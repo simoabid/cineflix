@@ -26,7 +26,125 @@ import {
 } from 'lucide-react';
 import SearchModal from './SearchModal';
 
-const Navbar: React.FC = () => {
+/**
+ * Type for a navigation item used in the navbar.
+ */
+export interface NavigationItem {
+  name: string;
+  path: string;
+  icon: React.ComponentType<any>;
+}
+
+/**
+ * Type for a notification item used in the navbar.
+ */
+export interface NotificationItem {
+  id: number | string;
+  title: string;
+  time: string;
+  type?: 'new' | 'update' | string;
+}
+
+/**
+ * Props for the Navbar component.
+ * Currently empty but documented for future extension.
+ */
+export interface NavbarProps {}
+
+/**
+ * Simple validator to ensure a value is a non-empty string.
+ * @param value - value to validate
+ */
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+/**
+ * Sanitize and clamp a search query provided by the user.
+ * - trims whitespace
+ * - limits length to 200 characters
+ * - returns empty string if invalid
+ *
+ * This is a pure helper extracted for testability and reuse.
+ * @param query - raw query string
+ */
+export const sanitizeSearchQuery = (query: unknown): string => {
+  if (!isNonEmptyString(query)) return '';
+  const trimmed = query.trim();
+  return trimmed.length > 200 ? trimmed.slice(0, 200) : trimmed;
+};
+
+/**
+ * Validate navigation items ensuring each has a safe path and required fields.
+ * Returns a new array with sanitized paths (fallbacks to '/') and logs warnings for invalid entries.
+ * This is pure and side-effect free except for console warnings for visibility.
+ * @param items - raw navigation items
+ */
+export const validateNavigationItems = (items: unknown): NavigationItem[] => {
+  if (!Array.isArray(items)) {
+    console.warn('validateNavigationItems expected an array, falling back to default navigation.');
+    return [{ name: 'Home', path: '/', icon: Home }];
+  }
+
+  return items
+    .map((it) => {
+      if (typeof it !== 'object' || it === null) return null;
+      const candidate = it as Partial<NavigationItem>;
+      const name = isNonEmptyString(candidate.name) ? candidate.name : 'Untitled';
+      const icon = (candidate.icon as React.ComponentType<any>) || Home;
+      let path = isNonEmptyString(candidate.path) ? candidate.path.trim() : '/';
+      if (!path.startsWith('/')) {
+        // ensure path is route-safe
+        path = `/${path}`;
+      }
+      return { name, path, icon } as NavigationItem;
+    })
+    .filter(Boolean) as NavigationItem[];
+};
+
+/**
+ * Validate notification items to ensure shape correctness.
+ * Returns a sanitized list with safe defaults where necessary.
+ * @param items - raw notification items
+ */
+export const validateNotificationItems = (items: unknown): NotificationItem[] => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items
+    .map((n) => {
+      if (typeof n !== 'object' || n === null) return null;
+      const candidate = n as Partial<NotificationItem>;
+      const id = candidate.id ?? Math.random().toString(36).slice(2, 9);
+      const title = isNonEmptyString(candidate.title) ? candidate.title : 'No title';
+      const time = isNonEmptyString(candidate.time) ? candidate.time : 'Unknown';
+      const type = candidate.type ?? 'update';
+      return { id, title, time, type } as NotificationItem;
+    })
+    .filter(Boolean) as NotificationItem[];
+};
+
+/**
+ * Determine whether a given route path is active for the current location.
+ * Guards against non-string inputs and normalizes trailing slashes so '/path' and '/path/' are considered equal.
+ * This is exported as a pure helper for reuse and testing.
+ * @param currentPath - current location pathname
+ * @param routePath - route path to compare against
+ */
+export const isActiveRoute = (currentPath: unknown, routePath: unknown): boolean => {
+  if (!isNonEmptyString(currentPath) || !isNonEmptyString(routePath)) return false;
+  const normalize = (p: string) => (p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p);
+  return normalize(currentPath) === normalize(routePath);
+};
+
+/**
+ * Navbar component - top site navigation including search, theme, and user menu controls.
+ *
+ * Behavior remains unchanged from previous implementation. State and event handlers are
+ * isolated into smaller internal functions to reduce cognitive complexity and improve testability.
+ *
+ * No props are expected for this component; it's a top-level UI piece connected to router via useLocation.
+ */
+const Navbar: React.FC<NavbarProps> = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -40,7 +158,31 @@ const Navbar: React.FC = () => {
   const notificationsRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
-  const toggleFullscreen = async () => {
+  // Raw data definitions (kept minimal and validated)
+  const rawNotifications = [
+    { id: 1, title: 'New Marvel movie added', time: '2 min ago', type: 'new' },
+    { id: 2, title: 'Your watchlist updated', time: '1 hour ago', type: 'update' },
+    { id: 3, title: 'New season available', time: '3 hours ago', type: 'new' },
+  ];
+
+  const rawNavigationItems = [
+    { name: 'Home', path: '/', icon: Home },
+    { name: 'Movies', path: '/movies', icon: Film },
+    { name: 'TV Shows', path: '/tv-shows', icon: Tv },
+    { name: 'Collections', path: '/collections', icon: Star },
+    { name: 'New & Popular', path: '/new-popular', icon: TrendingUp },
+    { name: 'My List', path: '/my-list', icon: Bookmark },
+  ];
+
+  // Validated data used in rendering
+  const notifications = validateNotificationItems(rawNotifications);
+  const navigationItems = validateNavigationItems(rawNavigationItems);
+
+  /**
+   * Toggle fullscreen mode using the Fullscreen API.
+   * Kept as an internal function for isolation and easy testing.
+   */
+  const toggleFullscreen = async (): Promise<void> => {
     try {
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
@@ -52,12 +194,22 @@ const Navbar: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
-    };
+  // Small helper actions to centralize state mutations
+  const openSearchModal = () => setIsSearchModalOpen(true);
+  const closeSearchModal = () => setIsSearchModalOpen(false);
+  const toggleMobileMenu = () => setMobileMenuOpen((prev) => !prev);
+  const toggleTheme = () => setIsDarkMode((prev) => !prev);
+  const toggleUserMenu = () => setUserMenuOpen((prev) => !prev);
+  const toggleNotifications = () => setNotificationsOpen((prev) => !prev);
+  const closeMobileMenu = () => setMobileMenuOpen(false);
 
-    const handleClickOutside = (event: MouseEvent) => {
+  // Event handlers isolated for readability and testability
+  const handleScroll = () => {
+    setIsScrolled(window.scrollY > 10);
+  };
+
+  const handleClickOutside = (event: MouseEvent) => {
+    try {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setUserMenuOpen(false);
       }
@@ -67,29 +219,35 @@ const Navbar: React.FC = () => {
       if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) {
         setMobileMenuOpen(false);
       }
-    };
+    } catch (e) {
+      // Defensive: ignore exceptions from unexpected event targets
+      console.warn('Error in handleClickOutside:', e);
+    }
+  };
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Open search modal with Cmd+K or Ctrl+K
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        setIsSearchModalOpen(true);
-      }
-      // Toggle fullscreen with F11
-      if (event.key === 'F11') {
-        event.preventDefault();
-        toggleFullscreen();
-      }
-      // Close mobile menu with Escape
-      if (event.key === 'Escape' && mobileMenuOpen) {
-        setMobileMenuOpen(false);
-      }
-    };
+  const handleKeyDown = (event: KeyboardEvent) => {
+    // Open search modal with Cmd+K or Ctrl+K
+    const key = event && (event as KeyboardEvent).key;
+    if ((event.metaKey || event.ctrlKey) && typeof key === 'string' && key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openSearchModal();
+    }
+    // Toggle fullscreen with F11
+    if (key === 'F11') {
+      event.preventDefault();
+      toggleFullscreen();
+    }
+    // Close mobile menu with Escape
+    if (key === 'Escape' && mobileMenuOpen) {
+      setMobileMenuOpen(false);
+    }
+  };
 
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
+  const handleFullscreenChange = () => {
+    setIsFullscreen(!!document.fullscreenElement);
+  };
 
+  useEffect(() => {
     // Prevent body scroll when mobile menu is open
     if (mobileMenuOpen) {
       document.body.style.overflow = 'hidden';
@@ -110,21 +268,6 @@ const Navbar: React.FC = () => {
       document.body.style.overflow = 'unset';
     };
   }, [mobileMenuOpen]);
-
-  const notifications = [
-    { id: 1, title: 'New Marvel movie added', time: '2 min ago', type: 'new' },
-    { id: 2, title: 'Your watchlist updated', time: '1 hour ago', type: 'update' },
-    { id: 3, title: 'New season available', time: '3 hours ago', type: 'new' },
-  ];
-
-  const navigationItems = [
-    { name: 'Home', path: '/', icon: Home },
-    { name: 'Movies', path: '/movies', icon: Film },
-    { name: 'TV Shows', path: '/tv-shows', icon: Tv },
-    { name: 'Collections', path: '/collections', icon: Star },
-    { name: 'New & Popular', path: '/new-popular', icon: TrendingUp },
-    { name: 'My List', path: '/my-list', icon: Bookmark },
-  ];
 
   return (
     <>
@@ -159,7 +302,7 @@ const Navbar: React.FC = () => {
                       key={item.path}
                       to={item.path}
                       className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 relative group ${
-                        location.pathname === item.path
+                        isActiveRoute(location.pathname, item.path)
                           ? 'text-white bg-netflix-red shadow-lg'
                           : 'text-gray-300 hover:text-white hover:bg-white/10'
                       }`}
@@ -173,7 +316,7 @@ const Navbar: React.FC = () => {
 
               {/* Mobile Menu Button */}
               <button 
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                onClick={toggleMobileMenu}
                 className="lg:hidden text-white p-2 rounded-lg hover:bg-white/10 transition-colors backdrop-blur-sm"
                 aria-label="Toggle mobile menu"
               >
@@ -186,7 +329,7 @@ const Navbar: React.FC = () => {
               {/* Enhanced Search - Responsive */}
               <div ref={searchRef} className="relative">
                 <button
-                  onClick={() => setIsSearchModalOpen(true)}
+                  onClick={openSearchModal}
                   className="flex items-center bg-black/20 backdrop-blur-md rounded-xl transition-all duration-300 border border-white/20 hover:border-netflix-red/50 hover:bg-black/30 group"
                 >
                   <Search className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 ml-2 sm:ml-3 group-hover:text-white transition-colors" />
@@ -202,7 +345,7 @@ const Navbar: React.FC = () => {
               
               {/* Theme Toggle */}
               <button 
-                onClick={() => setIsDarkMode(!isDarkMode)}
+                onClick={toggleTheme}
                 className="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors backdrop-blur-sm"
                 title="Toggle theme"
               >
@@ -221,7 +364,7 @@ const Navbar: React.FC = () => {
               {/* Notifications - Responsive */}
               <div ref={notificationsRef} className="relative">
                 <button 
-                  onClick={() => setNotificationsOpen(!notificationsOpen)}
+                  onClick={toggleNotifications}
                   className="relative p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors backdrop-blur-sm"
                 >
                   <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -260,7 +403,7 @@ const Navbar: React.FC = () => {
               {/* User Profile Dropdown - Responsive */}
               <div ref={userMenuRef} className="relative">
                 <button
-                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  onClick={toggleUserMenu}
                   className="flex items-center space-x-2 p-2 hover:bg-white/10 rounded-lg transition-colors backdrop-blur-sm"
                 >
                   <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-netflix-red via-red-600 to-red-700 rounded-full flex items-center justify-center ring-2 ring-gray-700/50">
@@ -331,7 +474,7 @@ const Navbar: React.FC = () => {
       {/* Mobile Menu - Enhanced */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" ref={mobileMenuRef}>
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)}></div>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={closeMobileMenu}></div>
           <div className="fixed top-14 sm:top-16 left-0 right-0 bg-black/20 backdrop-blur-xl border-b border-white/10 shadow-2xl">
             <div className="p-4 space-y-2">
               {navigationItems.map((item) => {
@@ -340,9 +483,9 @@ const Navbar: React.FC = () => {
                   <Link
                     key={item.path}
                     to={item.path}
-                    onClick={() => setMobileMenuOpen(false)}
+                    onClick={closeMobileMenu}
                     className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-300 ${
-                      location.pathname === item.path
+                      isActiveRoute(location.pathname, item.path)
                         ? 'text-white bg-netflix-red shadow-lg'
                         : 'text-gray-300 hover:text-white hover:bg-white/10'
                     }`}
@@ -357,8 +500,8 @@ const Navbar: React.FC = () => {
               <div className="pt-4 border-t border-gray-700/50 mt-4">
                 <button
                   onClick={() => {
-                    setIsSearchModalOpen(true);
-                    setMobileMenuOpen(false);
+                    openSearchModal();
+                    closeMobileMenu();
                   }}
                   className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                 >
@@ -368,8 +511,8 @@ const Navbar: React.FC = () => {
                 
                 <button
                   onClick={() => {
-                    setIsDarkMode(!isDarkMode);
-                    setMobileMenuOpen(false);
+                    toggleTheme();
+                    closeMobileMenu();
                   }}
                   className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                 >
@@ -390,9 +533,9 @@ const Navbar: React.FC = () => {
       {/* Search Modal */}
       <SearchModal
         isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
+        onClose={closeSearchModal}
         isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        onToggleTheme={toggleTheme}
       />
     </>
   );

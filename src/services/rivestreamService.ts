@@ -14,6 +14,21 @@ export interface RivestreamOptions {
   episode?: number;
 }
 
+/**
+ * Pure helper to format content title for torrent entries.
+ * Exported for testability.
+ * @param options RivestreamOptions
+ * @returns formatted title string like "TV Show S01E02" or "Movie"
+ */
+export function formatContentTitle(options: RivestreamOptions): string {
+  if (options.contentType === 'tv') {
+    const season = options.season !== undefined ? options.season.toString().padStart(2, '0') : '00';
+    const episode = options.episode !== undefined ? options.episode.toString().padStart(2, '0') : '00';
+    return `TV Show S${season}E${episode}`;
+  }
+  return 'Movie';
+}
+
 class RivestreamService {
   private readonly endpoints: RivestreamEndpoint[] = [
     {
@@ -41,6 +56,16 @@ class RivestreamService {
       description: 'Direct download functionality'
     }
   ];
+
+  private readonly httpClient?: { head?: (url: string, opts?: any) => Promise<any> };
+
+  /**
+   * Construct a RivestreamService.
+   * @param httpClient Optional HTTP client with a `head` method to check availability.
+   */
+  constructor(httpClient?: { head?: (url: string, opts?: any) => Promise<any> }) {
+    this.httpClient = httpClient;
+  }
 
   /**
    * Build URL for Rivestream embed based on content type and parameters
@@ -152,7 +177,33 @@ class RivestreamService {
   }
 
   /**
+   * Helper to perform retries with exponential backoff.
+   * Keeps observable behavior the same by bubbling errors to callers.
+   * @param operation async function to run
+   * @param maxAttempts number of attempts (default 3)
+   * @param baseDelayMs base delay in ms (default 200)
+   */
+  private async retryWithBackoff<T>(operation: () => Promise<T>, maxAttempts = 3, baseDelayMs = 200): Promise<T> {
+    let attempt = 0;
+    let lastError: any = null;
+    while (attempt < maxAttempts) {
+      try {
+        return await operation();
+      } catch (err) {
+        lastError = err;
+        attempt += 1;
+        if (attempt >= maxAttempts) break;
+        const delay = baseDelayMs * Math.pow(2, attempt - 1);
+        await new Promise(res => setTimeout(res, delay));
+      }
+    }
+    throw lastError;
+  }
+
+  /**
    * Get stream sources for a movie or TV show
+   * @param options RivestreamOptions
+   * @returns Promise<StreamSource[]>
    */
   async getStreamSources(options: RivestreamOptions): Promise<StreamSource[]> {
     const sources: StreamSource[] = [];
@@ -365,6 +416,8 @@ class RivestreamService {
 
   /**
    * Get download options for a movie or TV show
+   * @param options RivestreamOptions
+   * @returns Promise<DownloadOption[]>
    */
   async getDownloadOptions(options: RivestreamOptions): Promise<DownloadOption[]> {
     const downloadEndpoint = this.endpoints.find(e => e.type === 'download');
@@ -414,6 +467,8 @@ class RivestreamService {
 
   /**
    * Get torrent sources for a movie or TV show
+   * @param options RivestreamOptions
+   * @returns Promise<TorrentSource[]>
    */
   async getTorrentSources(options: RivestreamOptions): Promise<TorrentSource[]> {
     // Note: Rivestream doesn't directly provide torrent magnet links,
@@ -421,9 +476,7 @@ class RivestreamService {
     const torrentEndpoint = this.endpoints.find(e => e.type === 'torrent');
     if (!torrentEndpoint) return [];
 
-    const contentTitle = options.contentType === 'tv' 
-      ? `TV Show S${options.season?.toString().padStart(2, '0')}E${options.episode?.toString().padStart(2, '0')}`
-      : 'Movie';
+    const contentTitle = formatContentTitle(options);
 
     return [
       {
@@ -459,13 +512,25 @@ class RivestreamService {
 
   /**
    * Check if a source is available (basic connectivity test)
+   * If an injected httpClient is available, perform a HEAD request with retries.
+   * Otherwise, fallback to optimistic true (preserve original behavior).
+   * @param url string
+   * @returns Promise<boolean>
    */
   async checkSourceAvailability(url: string): Promise<boolean> {
     try {
+      if (this.httpClient && typeof this.httpClient.head === 'function') {
+        await this.retryWithBackoff(() => this.httpClient!.head!(url, { timeout: 2000 }), 3, 200);
+        return true;
+      }
       // In a real implementation, you might want to make a HEAD request
       // For now, we'll assume Rivestream sources are generally available
       return true;
     } catch (error) {
+      // log and return false to indicate unavailability
+      // preserve minimal observable behavior by returning false on actual failures
+      // but do not throw to keep callers' expectations stable
+      // eslint-disable-next-line no-console
       console.error('Source availability check failed:', error);
       return false;
     }
@@ -473,6 +538,8 @@ class RivestreamService {
 
   /**
    * Get all available content data for a movie or TV show
+   * @param options RivestreamOptions
+   * @returns Promise<{ streamSources: StreamSource[]; downloadOptions: DownloadOption[]; torrentSources: TorrentSource[] }>
    */
   async getAllContentData(options: RivestreamOptions) {
     try {
@@ -488,6 +555,7 @@ class RivestreamService {
         torrentSources
       };
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Error fetching Rivestream content data:', error);
       return {
         streamSources: [],
@@ -499,6 +567,8 @@ class RivestreamService {
 
   /**
    * Get available seasons and episodes for a TV show
+   * @param tmdbId number
+   * @returns Promise<Array<{ season: number; episodes: number[] }>>
    */
   async getTVShowSeasons(tmdbId: number): Promise<{ season: number; episodes: number[] }[]> {
     // This would typically come from TMDB API or Rivestream's metadata

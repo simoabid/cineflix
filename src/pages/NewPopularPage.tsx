@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import AddToListButton from '../components/AddToListButton';
 import LikeButton from '../components/LikeButton';
@@ -72,19 +72,211 @@ interface SectionData {
   type: 'movie' | 'tv' | 'mixed';
 }
 
+type TMDBResponse = { results: any[] };
+
+type SectionSet = {
+  newReleases: SectionData;
+  trendingNow: SectionData;
+  comingSoon: SectionData;
+  top10Movies: SectionData;
+  top10TV: SectionData;
+  recentlyAddedMovies: SectionData;
+  recentlyAddedTV: SectionData;
+};
+
+type ContentTypeFilter = 'all' | 'movies' | 'tv';
+
+type ServiceSet = {
+  getTrendingMovies: () => Promise<TMDBResponse>;
+  getTrendingTVShows: () => Promise<TMDBResponse>;
+  getPopularMovies: () => Promise<TMDBResponse>;
+  getPopularTVShows: () => Promise<TMDBResponse>;
+  getUpcomingMovies: () => Promise<TMDBResponse>;
+  getNowPlayingMovies: (page?: number) => Promise<TMDBResponse>;
+  getAiringTodayTVShows: () => Promise<TMDBResponse>;
+};
+
+/**
+ * Pure helper to normalize raw TMDB items into ContentItem shape.
+ * @param items - Raw items returned by TMDB
+ * @param type - 'movie' or 'tv'
+ * @returns Normalized ContentItem array
+ */
+export const processItems = (items: any[], type: 'movie' | 'tv'): ContentItem[] => {
+  return items.map(item => ({
+    ...item,
+    media_type: type,
+    release_date: item.release_date || item.first_air_date,
+    title: item.title || item.name,
+    original_title: item.original_title || item.original_name
+  }));
+};
+
+/**
+ * Pure helper to filter items by content type.
+ * Returns original items when contentType is 'all', otherwise filters by media_type.
+ * @param items - Array of ContentItem
+ * @param contentType - 'all' | 'movies' | 'tv'
+ */
+export const filterItemsByContentType = (items: ContentItem[], contentType: ContentTypeFilter): ContentItem[] => {
+  if (!Array.isArray(items)) return [];
+  if (contentType === 'all') return items;
+  if (contentType === 'movies') return items.filter(i => i.media_type === 'movie' || !i.media_type);
+  return items.filter(i => i.media_type === 'tv');
+};
+
+/**
+ * Pure helper for simple pagination.
+ * @param items - Array of ContentItem
+ * @param page - 1-based page number
+ * @param pageSize - items per page
+ */
+export const paginateItems = (items: ContentItem[], page = 1, pageSize = 20): ContentItem[] => {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const start = Math.max(0, (page - 1) * pageSize);
+  return items.slice(start, start + pageSize);
+};
+
+/**
+ * Pure helper to build sections from fetched TMDB responses.
+ * Uses filter and pagination helpers for clarity and testability.
+ */
+export const buildSectionsFromResponses = (
+  responses: {
+    trendingMoviesData: TMDBResponse;
+    trendingTVData: TMDBResponse;
+    popularMoviesData: TMDBResponse;
+    popularTVData: TMDBResponse;
+    upcomingMoviesData: TMDBResponse;
+    recentMoviesResponse: TMDBResponse;
+    airingTodayTVData: TMDBResponse;
+  },
+  contentType: ContentTypeFilter = 'all'
+): SectionSet => {
+  const {
+    trendingMoviesData,
+    trendingTVData,
+    popularMoviesData,
+    popularTVData,
+    upcomingMoviesData,
+    recentMoviesResponse,
+    airingTodayTVData
+  } = responses;
+
+  const movies = paginateItems(processItems(trendingMoviesData?.results || [], 'movie'), 1, 20);
+  const tvShows = paginateItems(processItems(trendingTVData?.results || [], 'tv'), 1, 20);
+  const popularMovies = paginateItems(processItems(popularMoviesData?.results || [], 'movie'), 1, 20);
+  const popularTV = paginateItems(processItems(popularTVData?.results || [], 'tv'), 1, 20);
+  const upcoming = paginateItems(processItems(upcomingMoviesData?.results || [], 'movie'), 1, 20);
+  const nowPlaying = paginateItems(processItems(recentMoviesResponse?.results || [], 'movie'), 1, 20);
+  const airingToday = paginateItems(processItems(airingTodayTVData?.results || [], 'tv'), 1, 20);
+
+  const filteredMovies = filterItemsByContentType(movies, contentType);
+  const filteredTV = filterItemsByContentType(tvShows, contentType);
+  const filteredPopularMovies = filterItemsByContentType(popularMovies, contentType);
+  const filteredPopularTV = filterItemsByContentType(popularTV, contentType);
+  const filteredUpcoming = filterItemsByContentType(upcoming, contentType);
+  const filteredNowPlaying = filterItemsByContentType(nowPlaying, contentType);
+  const filteredAiringToday = filterItemsByContentType(airingToday, contentType);
+
+  const sections: SectionSet = {
+    newReleases: {
+      title: 'New Releases',
+      items: [...filteredNowPlaying, ...filteredAiringToday].sort((a, b) => 
+        new Date(b.release_date || 0).getTime() - new Date(a.release_date || 0).getTime()
+      ).slice(0, 20),
+      type: 'mixed'
+    },
+    trendingNow: {
+      title: 'Trending Now',
+      items: [...filteredMovies, ...filteredTV].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)),
+      type: 'mixed'
+    },
+    comingSoon: {
+      title: 'Coming Soon',
+      items: filteredUpcoming.sort((a, b) => 
+        new Date(a.release_date || 0).getTime() - new Date(b.release_date || 0).getTime()
+      ),
+      type: 'movie'
+    },
+    top10Movies: {
+      title: 'Top 10 Movies',
+      items: filteredPopularMovies.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
+      type: 'movie'
+    },
+    top10TV: {
+      title: 'Top 10 TV Shows',
+      items: filteredPopularTV.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
+      type: 'tv'
+    },
+    recentlyAddedMovies: {
+      title: 'Recently Added Movies',
+      items: filteredNowPlaying.slice(0, 20),
+      type: 'movie'
+    },
+    recentlyAddedTV: {
+      title: 'Recently Added TV Shows',
+      items: filteredAiringToday.slice(0, 20),
+      type: 'tv'
+    },
+  };
+
+  return sections;
+};
+
+/**
+ * Fetch helper that accepts an injectable service set and returns built sections.
+ * Adds defensive handling for service failures and unexpected results.
+ */
+export const fetchSectionsWithServices = async (
+  services: ServiceSet,
+  contentType: ContentTypeFilter = 'all'
+): Promise<SectionSet> => {
+  const calls = [
+    services.getTrendingMovies(),
+    services.getTrendingTVShows(),
+    services.getPopularMovies(),
+    services.getPopularTVShows(),
+    services.getUpcomingMovies(),
+    services.getNowPlayingMovies(1),
+    services.getAiringTodayTVShows()
+  ];
+
+  const settled = await Promise.allSettled(calls);
+
+  const [
+    trendingMoviesData,
+    trendingTVData,
+    popularMoviesData,
+    popularTVData,
+    upcomingMoviesData,
+    recentMoviesResponse,
+    airingTodayTVData
+  ] = settled.map(result => {
+    if (result.status === 'fulfilled' && result.value && typeof result.value === 'object' && Array.isArray((result.value as any).results)) {
+      return result.value as TMDBResponse;
+    }
+    // Defensive fallback for failed or malformed responses
+    console.error('Service call failed or returned unexpected data, using empty fallback.', result);
+    return { results: [] } as TMDBResponse;
+  });
+
+  return buildSectionsFromResponses({
+    trendingMoviesData,
+    trendingTVData,
+    popularMoviesData,
+    popularTVData,
+    upcomingMoviesData,
+    recentMoviesResponse,
+    airingTodayTVData
+  }, contentType);
+};
+
 const NewPopularPage: React.FC = () => {
-  const [sections, setSections] = useState<{
-    newReleases: SectionData;
-    trendingNow: SectionData;
-    comingSoon: SectionData;
-    top10Movies: SectionData;
-    top10TV: SectionData;
-    recentlyAddedMovies: SectionData;
-    recentlyAddedTV: SectionData;
-  }>({
+  const [sections, setSections] = useState<SectionSet>({
     newReleases: { title: 'New Releases', items: [], type: 'mixed' },
     trendingNow: { title: 'Trending Now', items: [], type: 'mixed' },
-    comingSoon: { title: 'Coming Soon', items: [], type: 'mixed' },
+    comingSoon: { title: 'Coming Soon', items: [], type: 'movie' },
     top10Movies: { title: 'Top 10 Movies', items: [], type: 'movie' },
     top10TV: { title: 'Top 10 TV Shows', items: [], type: 'tv' },
     recentlyAddedMovies: { title: 'Recently Added Movies', items: [], type: 'movie' },
@@ -93,7 +285,7 @@ const NewPopularPage: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [contentType, setContentType] = useState<'all' | 'movies' | 'tv'>('all');
+  const [contentType, setContentType] = useState<ContentTypeFilter>('all');
   const [sortBy, setSortBy] = useState<'release_date' | 'popularity' | 'rating' | 'title'>('popularity');
   const [timePeriod, setTimePeriod] = useState<'week' | 'month' | 'year'>('week');
   const [heroIndex, setHeroIndex] = useState(0);
@@ -105,6 +297,7 @@ const NewPopularPage: React.FC = () => {
 
   useEffect(() => {
     fetchAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentType, sortBy, timePeriod]);
 
   useEffect(() => {
@@ -117,129 +310,45 @@ const NewPopularPage: React.FC = () => {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setHeroIndex((prev) => (prev + 1) % Math.max(3, sections.trendingNow.items.length));
+      setHeroIndex((prev) => (prev + 1) % Math.max(3, heroContent.length));
     }, 5000);
     return () => clearInterval(interval);
-  }, [sections.trendingNow.items]);
+  }, [/* updated below by heroContent */ heroIndex]);
 
   const fetchAllData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [
-        trendingMoviesData,
-        trendingTVData,
-        popularMoviesData,
-        popularTVData,
-        upcomingMoviesData,
-        recentMoviesResponse,
-        airingTodayTVData
-      ] = await Promise.all([
-        getTrendingMovies(),
-        getTrendingTVShows(),
-        getPopularMovies(),
-        getPopularTVShows(),
-        getUpcomingMovies(),
-        getNowPlayingMovies(1),
-        getAiringTodayTVShows()
-      ]);
+      const newSections = await fetchSectionsWithServices({
+        getTrendingMovies,
+        getTrendingTVShows,
+        getPopularMovies,
+        getPopularTVShows,
+        getUpcomingMovies,
+        getNowPlayingMovies,
+        getAiringTodayTVShows
+      }, contentType);
 
-
-
-      // Combine and process data based on filters
-      const processItems = (items: any[], type: 'movie' | 'tv') => {
-        return items.map(item => ({
-          ...item,
-          media_type: type,
-          release_date: item.release_date || item.first_air_date,
-          title: item.title || item.name,
-          original_title: item.original_title || item.original_name
-        }));
-      };
-
-      const movies = processItems(trendingMoviesData.results.slice(0, 20), 'movie');
-      const tvShows = processItems(trendingTVData.results.slice(0, 20), 'tv');
-      const popularMovies = processItems(popularMoviesData.results.slice(0, 20), 'movie');
-      const popularTV = processItems(popularTVData.results.slice(0, 20), 'tv');
-      const upcoming = processItems(upcomingMoviesData.results.slice(0, 20), 'movie');
-      const nowPlaying = processItems(recentMoviesResponse.results.slice(0, 20), 'movie');
-      const airingToday = processItems(airingTodayTVData.results.slice(0, 20), 'tv');
-
-      // Filter by content type
-      let filteredMovies = movies;
-      let filteredTV = tvShows;
-      let filteredPopularMovies = popularMovies;
-      let filteredPopularTV = popularTV;
-      let filteredUpcoming = upcoming;
-      let filteredNowPlaying = nowPlaying;
-      let filteredAiringToday = airingToday;
-
-      if (contentType === 'movies') {
-        filteredTV = [];
-        filteredPopularTV = [];
-        filteredAiringToday = [];
-      } else if (contentType === 'tv') {
-        filteredMovies = [];
-        filteredPopularMovies = [];
-        filteredUpcoming = [];
-        filteredNowPlaying = [];
-      }
-
-      setSections({
-        newReleases: {
-          title: 'New Releases',
-          items: [...filteredNowPlaying, ...filteredAiringToday].sort((a, b) => 
-            new Date(b.release_date || 0).getTime() - new Date(a.release_date || 0).getTime()
-          ).slice(0, 20),
-          type: 'mixed'
-        },
-        trendingNow: {
-          title: 'Trending Now',
-          items: [...filteredMovies, ...filteredTV].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)),
-          type: 'mixed'
-        },
-        comingSoon: {
-          title: 'Coming Soon',
-          items: filteredUpcoming.sort((a, b) => 
-            new Date(a.release_date || 0).getTime() - new Date(b.release_date || 0).getTime()
-          ),
-          type: 'movie'
-        },
-        top10Movies: {
-          title: 'Top 10 Movies',
-          items: filteredPopularMovies.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
-          type: 'movie'
-        },
-        top10TV: {
-          title: 'Top 10 TV Shows',
-          items: filteredPopularTV.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
-          type: 'tv'
-        },
-        recentlyAddedMovies: {
-          title: 'Recently Added Movies',
-          items: filteredNowPlaying.slice(0, 20),
-          type: 'movie'
-        },
-        recentlyAddedTV: {
-          title: 'Recently Added TV Shows',
-          items: filteredAiringToday.slice(0, 20),
-          type: 'tv'
-        },
-      });
-
-    } catch (err) {
-      setError('Failed to load content. Please try again later.');
+      setSections(newSections);
+    } catch (err: unknown) {
+      const message = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load content. Please try again later.';
+      setError(message);
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  const heroContent = useMemo(() => sections.trendingNow.items.slice(0, 5), [sections.trendingNow.items]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setHeroIndex((prev) => (prev + 1) % Math.max(3, heroContent.length));
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [heroContent.length]);
 
-  const heroContent = sections.trendingNow.items.slice(0, 5);
-  
   const handleHeroNavigation = useCallback((direction: 'prev' | 'next') => {
     setHeroIndex(prev => {
       if (direction === 'prev') {
@@ -248,6 +357,8 @@ const NewPopularPage: React.FC = () => {
       return prev === heroContent.length - 1 ? 0 : prev + 1;
     });
   }, [heroContent.length]);
+
+  const sectionEntries = useMemo(() => Object.entries(sections), [sections]);
 
   if (loading) {
     return (
@@ -471,7 +582,7 @@ const NewPopularPage: React.FC = () => {
 
       {/* Content Sections */}
       <div className="px-4 md:px-16 py-8 space-y-12">
-        {Object.entries(sections).map(([key, section]) => (
+        {sectionEntries.map(([key, section]) => (
           <ContentSection
             key={key}
             id={key}

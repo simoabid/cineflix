@@ -19,6 +19,9 @@ interface DownloadOptionsProps {
   options: DownloadOption[];
 }
 
+/**
+ * Represents progress and metadata for an active download.
+ */
 interface DownloadProgress {
   id: string;
   progress: number;
@@ -27,106 +30,280 @@ interface DownloadProgress {
   status: 'downloading' | 'paused' | 'completed' | 'error';
 }
 
+/**
+ * Returns CSS class names for a given quality label.
+ * Pure helper exported for testability.
+ * @param quality - Quality string like '4K', '1080p', etc.
+ */
+export const getQualityColor = (quality: string): string => {
+  switch (quality) {
+    case '4K':
+      return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
+    case '1080p':
+      return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
+    case '720p':
+      return 'text-green-400 bg-green-500/20 border-green-500/30';
+    case '480p':
+      return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30';
+    default:
+      return 'text-gray-400 bg-gray-500/20 border-gray-500/30';
+  }
+};
+
+/**
+ * Returns a small emoji icon representing the file container format.
+ * Pure helper exported for testability.
+ * @param format - File format like 'MP4' or 'MKV'.
+ */
+export const getFormatIcon = (format: string): string => {
+  switch (format) {
+    case 'MP4':
+      return '🎬';
+    case 'MKV':
+      return '📹';
+    default:
+      return '📁';
+  }
+};
+
+/**
+ * Maps a download status to a readable label for UI display.
+ * Pure helper exported for testability.
+ * @param status - Download status value.
+ * @param progress - Current progress percentage (0-100).
+ */
+export const formatStatusLabel = (status: DownloadProgress['status'], progress: number): string => {
+  if (status === 'completed') return 'Completed';
+  if (status === 'paused') return 'Paused';
+  if (status === 'error') return 'Error';
+  // default downloading
+  return progress > 0 ? 'Downloading...' : 'Waiting...';
+};
+
+/**
+ * Pure transformation function that advances a single download's progress.
+ * Returns the updated downloads array and whether the specific download completed.
+ * Exported for testability.
+ * @param prev - Previous DownloadProgress array
+ * @param optionId - ID of the download to update
+ */
+export const transformDownloadProgress = (
+  prev: DownloadProgress[],
+  optionId: string
+): { updated: DownloadProgress[]; completed: boolean } => {
+  let completed = false;
+  const updated = prev.map(download => {
+    if (download.id === optionId && download.status === 'downloading') {
+      const newProgress = Math.min(download.progress + Math.random() * 5, 100);
+      const isCompleted = newProgress >= 100;
+      if (isCompleted) completed = true;
+      return {
+        ...download,
+        progress: newProgress,
+        status: isCompleted ? 'completed' : 'downloading',
+        timeRemaining: isCompleted ? '0 min' : `${Math.max(1, Math.floor((100 - newProgress) / 2))} min`,
+        speed: isCompleted ? '0 MB/s' : `${(Math.random() * 3 + 2).toFixed(1)} MB/s`
+      };
+    }
+    return download;
+  });
+  return { updated, completed };
+};
+
+/**
+ * Retrieves a download progress entry by option id.
+ * Exported for testability.
+ * @param progressList - Array of DownloadProgress entries
+ * @param optionId - ID to find
+ */
+export const getDownloadStatus = (progressList: DownloadProgress[], optionId: string): DownloadProgress | undefined => {
+  return progressList.find(d => d.id === optionId);
+};
+
+/**
+ * Validates that a value is a non-empty string.
+ * Exported for testability.
+ * @param value - any value to validate
+ */
+export const isValidString = (value: unknown): value is string => {
+  return typeof value === 'string' && value.trim().length > 0;
+};
+
+/**
+ * Lightweight validation for a DownloadOption shape.
+ * Ensures required fields exist and are of expected primitive types.
+ * Exported for testability and defensive checks before starting downloads.
+ * @param option - object to validate
+ */
+export const isValidDownloadOption = (option: any): option is DownloadOption => {
+  if (!option || typeof option !== 'object') return false;
+  if (!isValidString(option.id)) return false;
+  if (!isValidString(option.format)) return false;
+  if (!isValidString(option.quality)) return false;
+  // fileSize, codec and estimatedDownloadTime are optional-ish but if present should be strings
+  if (option.fileSize && !isValidString(option.fileSize)) return false;
+  if (option.codec && !isValidString(option.codec)) return false;
+  if (option.estimatedDownloadTime && !isValidString(option.estimatedDownloadTime)) return false;
+  return true;
+};
+
+/**
+ * Normalizes an estimated time value into a safe string to display.
+ * If input is invalid, returns a sensible default.
+ * Exported for testability.
+ * @param time - user supplied estimated time
+ */
+export const normalizeEstimatedTime = (time: unknown): string => {
+  if (isValidString(time)) return time;
+  return '30 min';
+};
+
 const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress[]>([]);
   const [selectedOption, setSelectedOption] = useState<DownloadOption | null>(null);
 
+  /**
+   * Starts a fresh download entry for the given option id.
+   * Internal helper to keep handleDownload small.
+   * @param option - validated DownloadOption
+   */
+  const startNewDownload = (option: DownloadOption) => {
+    const newDownload: DownloadProgress = {
+      id: option.id,
+      progress: 0,
+      speed: '5.2 MB/s',
+      timeRemaining: normalizeEstimatedTime(option.estimatedDownloadTime),
+      status: 'downloading'
+    };
+
+    setDownloadProgress(prev => {
+      // prevent duplicate entries if one was just added
+      const exists = prev.some(d => d.id === option.id);
+      if (exists) return prev;
+      return [...prev, newDownload];
+    });
+    simulateDownload(option.id);
+  };
+
+  /**
+   * Pause an active download by option id.
+   * @param optionId - id of the download to pause
+   */
+  const pauseDownloadById = (optionId: string) => {
+    setDownloadProgress(prev =>
+      prev.map(d =>
+        d.id === optionId
+          ? { ...d, status: 'paused' as const }
+          : d
+      )
+    );
+  };
+
+  /**
+   * Resume a paused download by option id.
+   * @param optionId - id of the download to resume
+   */
+  const resumeDownloadById = (optionId: string) => {
+    setDownloadProgress(prev =>
+      prev.map(d =>
+        d.id === optionId
+          ? { ...d, status: 'downloading' as const }
+          : d
+      )
+    );
+    simulateDownload(optionId);
+  };
+
+  /**
+   * Retry a download that previously errored.
+   * @param option - the DownloadOption to retry
+   */
+  const retryDownload = (option: DownloadOption) => {
+    setDownloadProgress(prev =>
+      prev.map(d =>
+        d.id === option.id
+          ? { ...d, status: 'downloading' as const, speed: '0 MB/s', timeRemaining: normalizeEstimatedTime(option.estimatedDownloadTime) }
+          : d
+      )
+    );
+    simulateDownload(option.id);
+  };
+
+  /**
+   * Initiates, pauses, resumes, or retries a download for the given option.
+   * This function delegates to smaller helpers and includes explicit validation.
+   * @param option - Download option being acted upon
+   */
   const handleDownload = (option: DownloadOption) => {
-    const existingDownload = downloadProgress.find(d => d.id === option.id);
-    
-    if (existingDownload) {
-      if (existingDownload.status === 'downloading') {
-        // Pause download
-        setDownloadProgress(prev => 
-          prev.map(d => 
-            d.id === option.id 
-              ? { ...d, status: 'paused' as const }
-              : d
-          )
-        );
-      } else if (existingDownload.status === 'paused') {
-        // Resume download
-        setDownloadProgress(prev => 
-          prev.map(d => 
-            d.id === option.id 
-              ? { ...d, status: 'downloading' as const }
-              : d
-          )
-        );
-        simulateDownload(option.id);
-      }
-    } else {
-      // Start new download
-      const newDownload: DownloadProgress = {
-        id: option.id,
-        progress: 0,
-        speed: '5.2 MB/s',
-        timeRemaining: option.estimatedDownloadTime || '30 min',
-        status: 'downloading'
-      };
-      
-      setDownloadProgress(prev => [...prev, newDownload]);
-      simulateDownload(option.id);
+    // Defensive validation: ensure option shape is valid before proceeding.
+    if (!isValidDownloadOption(option)) {
+      // Fail gracefully without throwing; keep UI responsive.
+      // eslint-disable-next-line no-alert
+      alert('Invalid download option. Please try a different format.');
+      return;
     }
-  };
 
-  const simulateDownload = (optionId: string) => {
-    const interval = setInterval(() => {
-      setDownloadProgress(prev => {
-        const updated = prev.map(download => {
-          if (download.id === optionId && download.status === 'downloading') {
-            const newProgress = Math.min(download.progress + Math.random() * 5, 100);
-            const isCompleted = newProgress >= 100;
-            
-            return {
-              ...download,
-              progress: newProgress,
-              status: isCompleted ? 'completed' as const : 'downloading' as const,
-              timeRemaining: isCompleted ? '0 min' : `${Math.max(1, Math.floor((100 - newProgress) / 2))} min`,
-              speed: isCompleted ? '0 MB/s' : `${(Math.random() * 3 + 2).toFixed(1)} MB/s`
-            };
-          }
-          return download;
-        });
-        
-        const completed = updated.find(d => d.id === optionId && d.status === 'completed');
-        if (completed) {
-          clearInterval(interval);
+    try {
+      const existingDownload = downloadProgress.find(d => d.id === option.id);
+
+      if (existingDownload) {
+        if (existingDownload.status === 'downloading') {
+          pauseDownloadById(option.id);
+        } else if (existingDownload.status === 'paused') {
+          resumeDownloadById(option.id);
+        } else if (existingDownload.status === 'error') {
+          retryDownload(option);
         }
-        
-        return updated;
-      });
+      } else {
+        startNewDownload(option);
+      }
+    } catch (err) {
+      // Explicit error handling: mark the specific download as errored and surface a simple user message via state.
+      setDownloadProgress(prev =>
+        prev.map(d =>
+          d.id === option.id
+            ? { ...d, status: 'error' as const, speed: '0 MB/s', timeRemaining: 'Error' }
+            : d
+        )
+      );
+      // Minimal user-facing feedback.
+      // eslint-disable-next-line no-alert
+      alert('Failed to start download. Please try again.');
+    }
+  };
+
+  /**
+   * Simulates progression of a download. Uses transformDownloadProgress helper.
+   * Any unexpected exceptions mark the download as errored and stop the simulation.
+   * @param optionId - ID of the download to simulate
+   */
+  const simulateDownload = (optionId: string) => {
+    // Defensive guard: require a valid string id.
+    if (!isValidString(optionId)) return;
+
+    const interval = setInterval(() => {
+      try {
+        setDownloadProgress(prev => {
+          const { updated, completed } = transformDownloadProgress(prev, optionId);
+          if (completed) {
+            clearInterval(interval);
+          }
+          return updated;
+        });
+      } catch (e) {
+        // If something unexpected occurs during the simulation, mark the download as errored.
+        clearInterval(interval);
+        setDownloadProgress(prev =>
+          prev.map(d =>
+            d.id === optionId
+              ? { ...d, status: 'error' as const, speed: '0 MB/s', timeRemaining: 'Error' }
+              : d
+          )
+        );
+        // eslint-disable-next-line no-alert
+        alert('An error occurred while downloading. The download has been paused. Please retry.');
+      }
     }, 1000);
-  };
-
-  const getQualityColor = (quality: string) => {
-    switch (quality) {
-      case '4K':
-        return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
-      case '1080p':
-        return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
-      case '720p':
-        return 'text-green-400 bg-green-500/20 border-green-500/30';
-      case '480p':
-        return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30';
-      default:
-        return 'text-gray-400 bg-gray-500/20 border-gray-500/30';
-    }
-  };
-
-  const getFormatIcon = (format: string) => {
-    switch (format) {
-      case 'MP4':
-        return '🎬';
-      case 'MKV':
-        return '📹';
-      default:
-        return '📁';
-    }
-  };
-
-  const getDownloadStatus = (optionId: string) => {
-    return downloadProgress.find(d => d.id === optionId);
   };
 
   return (
@@ -182,6 +359,13 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                     <div className="flex items-center space-x-2">
                       {download.status === 'completed' ? (
                         <CheckCircle className="h-6 w-6 text-green-400" />
+                      ) : download.status === 'error' ? (
+                        <button
+                          onClick={() => handleDownload(option)}
+                          className="p-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
                       ) : (
                         <button
                           onClick={() => handleDownload(option)}
@@ -201,8 +385,7 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                   <div className="mb-2">
                     <div className="flex items-center justify-between text-sm mb-1">
                       <span className="text-gray-400">
-                        {download.status === 'completed' ? 'Completed' : 
-                         download.status === 'paused' ? 'Paused' : 'Downloading...'}
+                        {formatStatusLabel(download.status, download.progress)}
                       </span>
                       <span className="text-white">{Math.round(download.progress)}%</span>
                     </div>
@@ -210,7 +393,8 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                       <div
                         className={`h-2 rounded-full transition-all duration-300 ${
                           download.status === 'completed' ? 'bg-green-400' :
-                          download.status === 'paused' ? 'bg-yellow-400' : 'bg-[#ff0000]'
+                          download.status === 'paused' ? 'bg-yellow-400' :
+                          download.status === 'error' ? 'bg-red-400' : 'bg-[#ff0000]'
                         }`}
                         style={{ width: `${download.progress}%` }}
                       />
@@ -232,10 +416,11 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
       {/* Download Options Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
         {options.map((option, index) => {
-          const downloadStatus = getDownloadStatus(option.id);
+          const downloadStatus = getDownloadStatus(downloadProgress, option.id);
           const isDownloading = downloadStatus?.status === 'downloading';
           const isCompleted = downloadStatus?.status === 'completed';
           const isPaused = downloadStatus?.status === 'paused';
+          const isError = downloadStatus?.status === 'error';
           
           return (
             <motion.div
@@ -264,7 +449,7 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                 </div>
                 
                 {isCompleted && (
-                  <CheckCircleIcon className="h-8 w-8 text-green-400" />
+                  <CheckCircle className="h-8 w-8 text-green-400" />
                 )}
               </div>
 
@@ -353,6 +538,8 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                     ? 'bg-yellow-600 text-white hover:bg-yellow-700'
                     : isDownloading
                     ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                    : isError
+                    ? 'bg-yellow-600 text-white hover:bg-yellow-700'
                     : 'bg-[#ff0000] text-white hover:bg-red-700'
                 }`}
                 whileHover={!isDownloading ? { scale: 1.02 } : {}}
@@ -373,6 +560,11 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                     <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
                     <span>Downloading...</span>
                   </>
+                ) : isError ? (
+                  <>
+                    <Download className="h-5 w-5" />
+                    <span>Retry Download</span>
+                  </>
                 ) : (
                   <>
                     <Download className="h-5 w-5" />
@@ -386,6 +578,9 @@ const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
                 <div className="mt-3 text-xs text-gray-400 text-center">
                   {downloadStatus.progress > 0 && (
                     <span>{Math.round(downloadStatus.progress)}% • {downloadStatus.speed}</span>
+                  )}
+                  {downloadStatus.status === 'error' && (
+                    <div className="text-red-400 mt-1">Download failed. Click Retry to attempt again.</div>
                   )}
                 </div>
               )}

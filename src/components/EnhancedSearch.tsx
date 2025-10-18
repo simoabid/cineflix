@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Search, Filter, Clock, Star, TrendingUp, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-interface SearchSuggestion {
+export interface SearchSuggestion {
   id: string;
   title: string;
   type: 'movie' | 'tv' | 'collection' | 'person';
@@ -11,10 +11,275 @@ interface SearchSuggestion {
   poster?: string;
 }
 
+export type FilterType = 'all' | 'movie' | 'tv' | 'collection' | 'person';
+
 interface EnhancedSearchProps {
+  /**
+   * Optional callback fired when the expanded search UI is closed.
+   */
   onClose?: () => void;
+  /**
+   * Controls whether the enhanced (expanded) search UI is shown.
+   */
   isExpanded?: boolean;
 }
+
+/**
+ * Validate that a query is a non-empty, non-whitespace string.
+ * @param query - The input query to validate.
+ * @returns True if valid; false otherwise.
+ */
+export const isValidQuery = (query: unknown): query is string =>
+  typeof query === 'string' && query.trim().length > 0;
+
+/**
+ * Normalize a query for consistent matching.
+ * Trims and lowercases the input to make matching deterministic.
+ * Guards against non-string inputs.
+ * @param query - The raw query string.
+ * @returns Normalized query string (or empty string for invalid inputs).
+ */
+export const normalizeQuery = (query: unknown): string =>
+  typeof query === 'string' ? query.trim().toLowerCase() : '';
+
+/**
+ * Normalize/validate incoming filter values into a known FilterType.
+ * Pure helper that ensures callers always receive a valid filter id.
+ * @param filter - Potential filter value from user input or URL.
+ * @returns A validated FilterType (defaults to 'all' when unknown).
+ */
+export const normalizeFilter = (filter: unknown): FilterType => {
+  if (typeof filter === 'string') {
+    const f = filter as FilterType;
+    if (f === 'all' || f === 'movie' || f === 'tv' || f === 'collection' || f === 'person') {
+      return f;
+    }
+  }
+  return 'all';
+};
+
+/**
+ * Paginate an array of SearchSuggestion items safely.
+ * Guards against non-array inputs and normalizes page bounds.
+ * @param items - Array of items to paginate.
+ * @param page - 1-based page index.
+ * @param pageSize - Items per page.
+ * @returns Object containing paginated items and metadata.
+ */
+export const paginateResults = (
+  items: SearchSuggestion[] | null | undefined,
+  page = 1,
+  pageSize = 10
+) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const totalItems = safeItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize)));
+  const normalizedPage = Math.min(Math.max(1, page), totalPages);
+  const start = (normalizedPage - 1) * pageSize;
+  const paged = safeItems.slice(start, start + pageSize);
+  return {
+    items: paged,
+    page: normalizedPage,
+    pageSize,
+    totalPages,
+    totalItems,
+  };
+};
+
+/**
+ * Update the recent searches list in a pure manner.
+ * Keeps the most recent distinct queries first and limits the list to `limit`.
+ * @param previous - Previous recent searches array.
+ * @param newQuery - The query to add.
+ * @param limit - Maximum number of recent items to keep.
+ * @returns New array of recent searches.
+ */
+export const updateRecentSearches = (
+  previous: string[],
+  newQuery: string,
+  limit = 5
+): string[] => {
+  if (!isValidQuery(newQuery)) return previous.slice(0, limit);
+  const normalized = newQuery.trim();
+  const filtered = previous.filter((item) => item !== normalized);
+  const updated = [normalized, ...filtered].slice(0, limit);
+  return updated;
+};
+
+/**
+ * Rank suggestions by relevance.
+ * Scoring logic (simple heuristic):
+ * - Exact prefix match (title startsWith query) gets +100.
+ * - Partial inclusion gets +50.
+ * - Rating contributes up to +10 (rating / 10 * 10).
+ * - Higher score sorts first; ties fall back to alphabetical title.
+ *
+ * This function is pure and exported for unit testing.
+ * @param suggestions - Array of suggestions to rank.
+ * @param rawQuery - The user's raw query string.
+ * @returns A new array of suggestions sorted by descending relevance.
+ */
+export const rankSuggestions = (
+  suggestions: SearchSuggestion[] | null | undefined,
+  rawQuery: string
+): SearchSuggestion[] => {
+  if (!Array.isArray(suggestions)) return [];
+  const q = normalizeQuery(rawQuery);
+  if (!q) return suggestions.slice();
+
+  const scoreFor = (s: SearchSuggestion): number => {
+    const title = normalizeQuery(s.title || '');
+    let score = 0;
+
+    if (title.startsWith(q)) score += 100;
+    else if (title.includes(q)) score += 50;
+
+    if (typeof s.rating === 'number' && !Number.isNaN(s.rating)) {
+      // normalize to 0..10 scale contribution
+      const ratingContribution = Math.max(0, Math.min(10, s.rating)) / 10 * 10;
+      score += ratingContribution;
+    }
+
+    return score;
+  };
+
+  return suggestions
+    .map((s) => ({ s, score: scoreFor(s) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.s.title.localeCompare(b.s.title);
+    })
+    .map((item) => item.s);
+};
+
+/**
+ * Simulate fetching suggestions from an API.
+ * This pure helper accepts a data source and filtering dependencies so it can be unit tested.
+ * It returns a Promise that resolves with filtered and ranked suggestions.
+ *
+ * For robustness:
+ * - Rejects if query is invalid.
+ * - Returns an empty array if no matches.
+ *
+ * @param query - The raw query string.
+ * @param filter - Selected filter string ('all'|'movie'|'tv'|'collection'|'person').
+ * @param data - The array of available suggestions to search within.
+ * @param delayMs - Artificial delay in milliseconds to simulate network latency (default 300ms).
+ * @returns Promise resolving to an array of SearchSuggestion.
+ */
+export const fetchSuggestions = async (
+  query: string,
+  filter: FilterType,
+  data: SearchSuggestion[],
+  delayMs = 300
+): Promise<SearchSuggestion[]> => {
+  return new Promise<SearchSuggestion[]>((resolve, reject) => {
+    if (!isValidQuery(query)) {
+      // Immediately resolve to empty array for invalid queries to simplify callers.
+      resolve([]);
+      return;
+    }
+
+    // Simulate async latency
+    setTimeout(() => {
+      try {
+        const normalized = normalizeQuery(query);
+        const safeFilter = normalizeFilter(filter);
+        const safeData = Array.isArray(data) ? data : [];
+        const filtered = safeData.filter((item) => {
+          const matchesQuery = (item.title || '').toLowerCase().includes(normalized);
+          const matchesFilter = safeFilter === 'all' ? true : item.type === safeFilter;
+          return matchesQuery && matchesFilter;
+        });
+
+        const ranked = rankSuggestions(filtered, query);
+        resolve(ranked);
+      } catch (err) {
+        // Defensive: ensure any unexpected error is surfaced to caller.
+        reject(err);
+      }
+    }, delayMs);
+  });
+};
+
+/**
+ * Return an emoji icon for a given suggestion type.
+ * Exported to allow unit testing and reuse.
+ * @param type - One of 'movie'|'tv'|'collection'|'person' or any other string for default.
+ */
+export const getTypeIcon = (type: string): string => {
+  switch (type) {
+    case 'movie':
+      return '🎬';
+    case 'tv':
+      return '📺';
+    case 'collection':
+      return '🎭';
+    case 'person':
+      return '👤';
+    default:
+      return '🔍';
+  }
+};
+
+/**
+ * Map suggestion type to a Tailwind color class.
+ * Exported for consistency and unit testing.
+ * @param type - Suggestion type string.
+ */
+export const getTypeColor = (type: string): string => {
+  switch (type) {
+    case 'movie':
+      return 'text-blue-400';
+    case 'tv':
+      return 'text-green-400';
+    case 'collection':
+      return 'text-purple-400';
+    case 'person':
+      return 'text-yellow-400';
+    default:
+      return 'text-gray-400';
+  }
+};
+
+/**
+ * Mock suggestion data used by the component as a local data source.
+ * Kept in-file so the UI remains consistent and testable without external APIs.
+ */
+const mockSuggestions: SearchSuggestion[] = [
+  {
+    id: '1',
+    title: 'Marvel Cinematic Universe',
+    type: 'collection',
+    year: '2008-2024',
+    rating: 8.2,
+    poster: '/api/placeholder/40/60'
+  },
+  {
+    id: '2',
+    title: 'The Dark Knight',
+    type: 'movie',
+    year: '2008',
+    rating: 9.0,
+    poster: '/api/placeholder/40/60'
+  },
+  {
+    id: '3',
+    title: 'Breaking Bad',
+    type: 'tv',
+    year: '2008-2013',
+    rating: 9.5,
+    poster: '/api/placeholder/40/60'
+  },
+  {
+    id: '4',
+    title: 'Star Wars Saga',
+    type: 'collection',
+    year: '1977-2019',
+    rating: 8.5,
+    poster: '/api/placeholder/40/60'
+  }
+];
 
 const EnhancedSearch: React.FC<EnhancedSearchProps> = ({ onClose, isExpanded = false }) => {
   const [query, setQuery] = useState('');
@@ -26,50 +291,15 @@ const EnhancedSearch: React.FC<EnhancedSearchProps> = ({ onClose, isExpanded = f
     'Top Rated TV Shows'
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<string>('all');
+  const [selectedFilter, setSelectedFilter] = useState<FilterType>('all');
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  const searchFilters = [
+  const searchFilters: { id: FilterType; label: string; icon: any }[] = [
     { id: 'all', label: 'All', icon: Search },
     { id: 'movie', label: 'Movies', icon: Star },
     { id: 'tv', label: 'TV Shows', icon: TrendingUp },
     { id: 'collection', label: 'Collections', icon: Filter },
-  ];
-
-  const mockSuggestions: SearchSuggestion[] = [
-    {
-      id: '1',
-      title: 'Marvel Cinematic Universe',
-      type: 'collection',
-      year: '2008-2024',
-      rating: 8.2,
-      poster: '/api/placeholder/40/60'
-    },
-    {
-      id: '2',
-      title: 'The Dark Knight',
-      type: 'movie',
-      year: '2008',
-      rating: 9.0,
-      poster: '/api/placeholder/40/60'
-    },
-    {
-      id: '3',
-      title: 'Breaking Bad',
-      type: 'tv',
-      year: '2008-2013',
-      rating: 9.5,
-      poster: '/api/placeholder/40/60'
-    },
-    {
-      id: '4',
-      title: 'Star Wars Saga',
-      type: 'collection',
-      year: '1977-2019',
-      rating: 8.5,
-      poster: '/api/placeholder/40/60'
-    }
   ];
 
   useEffect(() => {
@@ -78,58 +308,65 @@ const EnhancedSearch: React.FC<EnhancedSearchProps> = ({ onClose, isExpanded = f
     }
   }, [isExpanded]);
 
+  /**
+   * Handle performing a search action triggered by user interactions.
+   * Validates input, updates recent searches, navigates to the search results route,
+   * clears transient state, and closes the expanded UI if provided.
+   * This function intentionally accepts a raw string and performs its own validation.
+   *
+   * @param searchQuery - The raw query entered or selected by the user.
+   */
   const handleSearch = (searchQuery: string) => {
-    if (searchQuery.trim()) {
-      // Add to recent searches
-      setRecentSearches(prev => {
-        const updated = [searchQuery, ...prev.filter(item => item !== searchQuery)].slice(0, 5);
-        return updated;
-      });
-      
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}&filter=${selectedFilter}`);
+    if (!isValidQuery(searchQuery)) {
+      // Defensive: ignore invalid submissions.
+      return;
+    }
+
+    const normalized = searchQuery.trim();
+
+    setRecentSearches((prev) => updateRecentSearches(prev, normalized, 5));
+
+    try {
+      navigate(`/search?q=${encodeURIComponent(normalized)}&filter=${selectedFilter}`);
+    } catch (err) {
+      // If navigation fails, still clear UI state to avoid leaving inconsistent UI.
+      // In real app, we might surface an error toast; keep silent here for parity.
+    } finally {
       setQuery('');
       setSuggestions([]);
       onClose?.();
     }
   };
 
-  const handleInputChange = (value: string) => {
+  /**
+   * Handle input changes in a robust, testable manner.
+   * Uses fetchSuggestions helper to retrieve suggestions and manages loading and error states.
+   * The function is async but intentionally not awaited by callers to allow React events to continue.
+   *
+   * @param value - The new input value from the user.
+   */
+  const handleInputChange = async (value: string) => {
     setQuery(value);
-    
-    if (value.length > 0) {
-      setIsLoading(true);
-      // Simulate API call
-      setTimeout(() => {
-        const filtered = mockSuggestions.filter(item => 
-          item.title.toLowerCase().includes(value.toLowerCase()) &&
-          (selectedFilter === 'all' || item.type === selectedFilter)
-        );
-        setSuggestions(filtered);
-        setIsLoading(false);
-      }, 300);
-    } else {
+
+    if (!isValidQuery(value)) {
       setSuggestions([]);
       setIsLoading(false);
+      return;
     }
-  };
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'movie': return '🎬';
-      case 'tv': return '📺';
-      case 'collection': return '🎭';
-      case 'person': return '👤';
-      default: return '🔍';
-    }
-  };
+    setIsLoading(true);
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'movie': return 'text-blue-400';
-      case 'tv': return 'text-green-400';
-      case 'collection': return 'text-purple-400';
-      case 'person': return 'text-yellow-400';
-      default: return 'text-gray-400';
+    try {
+      const results = await fetchSuggestions(value, selectedFilter, mockSuggestions, 300);
+      setSuggestions(results);
+    } catch (err) {
+      // Log for diagnostics but keep UI stable by setting no suggestions.
+      // In a production app, we'd report this to monitoring or show user feedback.
+      // eslint-disable-next-line no-console
+      console.error('Failed to fetch suggestions', err);
+      setSuggestions([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -274,7 +511,7 @@ const EnhancedSearch: React.FC<EnhancedSearchProps> = ({ onClose, isExpanded = f
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setRecentSearches(prev => prev.filter(item => item !== search));
+                          setRecentSearches((prev) => prev.filter((item) => item !== search));
                         }}
                         className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-white transition-all"
                       >

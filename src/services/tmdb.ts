@@ -12,6 +12,132 @@ const tmdbApi = axios.create({
   },
 });
 
+// Runtime guards and local safe request wrapper to mitigate axios-related risks
+type AnyObject = { [key: string]: any };
+
+class ControlledApiError extends Error {
+  public status?: number;
+  public code?: string;
+  public details?: any;
+  constructor(message: string, status?: number, code?: string, details?: any) {
+    super(message);
+    this.name = 'ControlledApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+const DEFAULT_TIMEOUT = 8000;
+// Merge safe defaults into axios instance
+tmdbApi.defaults.timeout = DEFAULT_TIMEOUT;
+tmdbApi.defaults.headers = {
+  ...(tmdbApi.defaults.headers || {}),
+  Accept: 'application/json',
+};
+
+// Simple sanitize for paths/URLs: keep only pathname and query, remove any .. segments
+const sanitizePath = (path: string): string => {
+  if (!path || typeof path !== 'string') return '/';
+  try {
+    const url = new URL(path, BASE_URL);
+    const rawSegments = url.pathname.split('/').filter(Boolean);
+    const cleanSegments = rawSegments.filter(seg => seg !== '..');
+    const cleanPath = '/' + cleanSegments.join('/');
+    return `${cleanPath}${url.search || ''}`;
+  } catch {
+    // Fallback: strip host if present, remove .. segments
+    let p = path.trim();
+    p = p.replace(/^https?:\/\/[^/]+/i, '');
+    const parts = p.split('?');
+    const pathname = parts[0].split('/').filter(seg => seg !== '..').join('/');
+    const search = parts[1] ? `?${parts[1]}` : '';
+    return pathname.startsWith('/') ? `${pathname}${search}` : `/${pathname}${search}`;
+  }
+};
+
+// Whitelist keys and basic value sanitization
+const sanitizeParams = (params?: AnyObject): AnyObject => {
+  if (!params || typeof params !== 'object') return {};
+  const clean: AnyObject = {};
+  const keyRegex = /^[a-zA-Z0-9_.-]+$/;
+  for (const key of Object.keys(params)) {
+    if (!keyRegex.test(key)) continue;
+    const val = params[key];
+    if (val === undefined || val === null) continue;
+    if (typeof val === 'string') {
+      const trimmed = val.trim().slice(0, 500);
+      clean[key] = trimmed;
+    } else if (typeof val === 'number') {
+      if (!Number.isFinite(val)) continue;
+      clean[key] = val;
+    } else if (typeof val === 'boolean') {
+      clean[key] = val;
+    } else if (Array.isArray(val)) {
+      const arr = val
+        .map(item => {
+          if (typeof item === 'string') return item.trim().slice(0, 200);
+          if (typeof item === 'number' && Number.isFinite(item)) return String(item);
+          return '';
+        })
+        .filter(Boolean);
+      if (arr.length) clean[key] = arr.join(',');
+    } else {
+      // ignore complex objects to avoid injection
+      continue;
+    }
+  }
+  return clean;
+};
+
+const shouldRetry = (err: any): boolean => {
+  if (!err) return false;
+  if (err.code === 'ECONNABORTED') return true;
+  const status = err?.response?.status;
+  if (!status) return true; // network-level error
+  if (status >= 500 && status < 600) return true;
+  return false;
+};
+
+// Preserve original get for potential future use
+const originalGet = tmdbApi.get.bind(tmdbApi);
+
+// Override tmdbApi.get with a guarded implementation
+tmdbApi.get = async (url: string, config: AnyObject = {}) => {
+  const safePath = sanitizePath(url);
+  const safeParams = sanitizeParams(config?.params);
+  const mergedParams = { ...(tmdbApi.defaults.params || {}), ...safeParams };
+  const mergedConfig: AnyObject = {
+    ...config,
+    params: mergedParams,
+    timeout: config?.timeout || DEFAULT_TIMEOUT,
+    headers: { ...(tmdbApi.defaults.headers || {}), ...(config?.headers || {}) }
+  };
+
+  let lastErr: any = null;
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const fullUrl = `${BASE_URL}${safePath}`;
+      const response = await axios.get(fullUrl, mergedConfig);
+      return response;
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < maxAttempts && shouldRetry(err)) {
+        await delay(200 * attempt);
+        continue;
+      }
+      const status = err?.response?.status;
+      const message = status ? `TMDB API error (status ${status})` : 'TMDB network error';
+      const controlled = new ControlledApiError(message, status, err?.code, undefined);
+      // Attach minimal original error message for debugging but avoid sensitive data
+      (controlled as any).original = { message: err?.message };
+      throw controlled;
+    }
+  }
+  throw new ControlledApiError('Unknown TMDB request failure');
+};
+
 // Configuration
 let imageConfig: ImageConfig | null = null;
 

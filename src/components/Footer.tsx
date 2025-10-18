@@ -42,24 +42,245 @@ import {
   MessageSquare
 } from 'lucide-react';
 
-const Footer: React.FC = () => {
-  const currentYear = new Date().getFullYear();
+/**
+ * Pure helper exported for unit tests to get the current year.
+ * Keeps year derivation deterministic and easily mockable in tests.
+ */
+export const getCurrentYear = (): number => {
+  return new Date().getFullYear();
+};
+
+/**
+ * LinkItem describes a single link or action shown in footer sections.
+ * - name: Display label
+ * - href: Optional URL; if absent, action should be provided
+ * - icon: Optional icon component to render (fallbacks are provided where used)
+ * - badge/count/color: Optional UI adornments
+ * - action: Optional callback for button actions
+ */
+interface LinkItem {
+  name: string;
+  href?: string;
+  icon?: React.ComponentType<any>;
+  badge?: string;
+  count?: string;
+  color?: string;
+  action?: () => void;
+}
+
+/**
+ * Props for each grouped footer section.
+ */
+interface FooterSectionProps {
+  title: string;
+  links: LinkItem[];
+  sectionKey: string;
+  showCounts?: boolean;
+  showBadges?: boolean;
+}
+
+interface FooterProps {}
+
+/**
+ * Render a quick action button used in the top-right area of the footer.
+ * Exported as a pure function to enable easy unit testing.
+ */
+export const renderQuickAction = (actionItem: LinkItem): JSX.Element => {
+  const handleClick = actionItem.action ?? (() => {});
+  const Icon = actionItem.icon ?? Search;
+
+  return (
+    <motion.button
+      key={actionItem.name}
+      whileHover={{ scale: 1.1 }}
+      whileTap={{ scale: 0.95 }}
+      className="relative p-3 bg-gray-800/50 hover:bg-netflix-red/20 rounded-full transition-colors duration-300 group"
+      onClick={() => {
+        try {
+          handleClick();
+        } catch {
+          /* swallow action errors to avoid breaking footer UI */
+        }
+      }}
+    >
+      <Icon className="w-5 h-5 text-gray-400 group-hover:text-netflix-red transition-colors duration-300" />
+      {actionItem.badge && (
+        <span className="absolute -top-1 -right-1 bg-netflix-red text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
+          {actionItem.badge}
+        </span>
+      )}
+    </motion.button>
+  );
+};
+
+/**
+ * Render a social item tile. Exported so it can be unit tested separately.
+ */
+export const renderSocialItem = (socialLink: LinkItem): JSX.Element => {
+  const Icon = socialLink.icon ?? Globe;
+  const href = socialLink.href ?? '#';
+  const colorStyle = socialLink.color ? { '--social-color': socialLink.color } as any : undefined;
+
+  return (
+    <motion.a
+      key={socialLink.name}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      whileHover={{ scale: 1.1, y: -2 }}
+      whileTap={{ scale: 0.95 }}
+      className="group p-4 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl transition-all duration-300 flex flex-col items-center gap-2"
+      style={colorStyle}
+    >
+      <Icon className="w-6 h-6 text-gray-400 group-hover:text-white transition-colors duration-300" />
+      <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors duration-300">
+        {socialLink.name}
+      </span>
+    </motion.a>
+  );
+};
+
+/**
+ * FooterSection - internal helper component to render grouped footer links.
+ * Separated as a typed sub-component for clarity and testability.
+ */
+const FooterSection: React.FC<FooterSectionProps & {
+  expandedSection: string | null;
+  toggleSection: (section: string) => void;
+}> = ({ 
+  title, 
+  links, 
+  sectionKey, 
+  showCounts = false, 
+  showBadges = false,
+  expandedSection,
+  toggleSection
+}) => {
+  const isExpanded = expandedSection === sectionKey;
+
+  const renderLinkItem = (link: LinkItem, index: number) => {
+    const Icon = link.icon ?? Globe;
+    return (
+      <motion.li
+        key={link.name}
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: index * 0.05 }}
+      >
+        {link.href ? (
+          <a
+            href={link.href}
+            className="group flex items-center gap-3 text-gray-400 hover:text-white transition-all duration-300 hover:translate-x-2"
+          >
+            <Icon className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
+            <span className="flex-1">{link.name}</span>
+            {showCounts && link.count && (
+              <span className="bg-netflix-red text-white text-xs px-2 py-1 rounded-full font-medium">
+                {link.count}
+              </span>
+            )}
+            {showBadges && link.badge && (
+              <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-black text-xs px-2 py-1 rounded-full font-bold">
+                {link.badge}
+              </span>
+            )}
+          </a>
+        ) : (
+          <button
+            onClick={() => {
+              try {
+                link.action && link.action();
+              } catch {
+                /* swallow action errors to avoid breaking footer UI */
+              }
+            }}
+            className="group flex items-center gap-3 text-gray-400 hover:text-white transition-all duration-300 hover:translate-x-2"
+          >
+            <Icon className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
+            <span className="flex-1 text-left">{link.name}</span>
+            {showCounts && link.count && (
+              <span className="bg-netflix-red text-white text-xs px-2 py-1 rounded-full font-medium">
+                {link.count}
+              </span>
+            )}
+            {showBadges && link.badge && (
+              <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-black text-xs px-2 py-1 rounded-full font-bold">
+                {link.badge}
+              </span>
+            )}
+          </button>
+        )}
+      </motion.li>
+    );
+  };
+
+  return (
+    <div className="footer-section">
+      <button
+        onClick={() => toggleSection(sectionKey)}
+        className="flex items-center justify-between w-full text-left group md:pointer-events-none"
+      >
+        <h3 className="text-lg font-semibold text-white mb-6 group-hover:text-netflix-red transition-colors duration-300 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-netflix-red" />
+          {title}
+        </h3>
+        <ChevronDown 
+          className={`w-5 h-5 text-gray-400 transition-transform duration-300 md:hidden ${
+            isExpanded ? 'rotate-180' : ''
+          }`} 
+        />
+      </button>
+      
+      <AnimatePresence>
+        {(isExpanded || typeof window !== 'undefined' && window.innerWidth >= 768) && (
+          <motion.ul
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="space-y-4"
+          >
+            {links.map((link, index) => renderLinkItem(link, index))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+/**
+ * Footer component - primary export. Renders the site footer with multiple sections.
+ */
+const Footer: React.FC<FooterProps> = () => {
+  const currentYear = getCurrentYear();
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => setIsVisible(entry.isIntersecting),
-      { threshold: 0.1 }
-    );
-    
-    const footerElement = document.querySelector('#cineflix-footer');
-    if (footerElement) observer.observe(footerElement);
-    
-    return () => observer.disconnect();
+    let observer: IntersectionObserver | null = null;
+    try {
+      observer = new IntersectionObserver(
+        ([entry]) => setIsVisible(entry.isIntersecting),
+        { threshold: 0.1 }
+      );
+      
+      const footerElement = document.querySelector('#cineflix-footer');
+      if (footerElement && observer) observer.observe(footerElement);
+    } catch (error) {
+      // Graceful fallback: if IntersectionObserver is not available or errors, just show footer animations
+      setIsVisible(true);
+    }
+
+    return () => {
+      try {
+        if (observer) observer.disconnect();
+      } catch {
+        /* ignore disconnect errors */
+      }
+    };
   }, []);
 
-  const smartBrowseLinks = [
+  const smartBrowseLinks: LinkItem[] = [
     { name: 'Home', href: '/', icon: Home, badge: '12 New' },
     { name: 'Movies', href: '/movies', icon: Film, badge: 'Latest' },
     { name: 'TV Shows', href: '/tv-shows', icon: Tv, badge: '5 Episodes' },
@@ -70,7 +291,7 @@ const Footer: React.FC = () => {
     { name: 'Coming Soon', href: '/coming-soon', icon: Calendar, badge: 'Preview' },
   ];
 
-  const myCineFlixLinks = [
+  const myCineFlixLinks: LinkItem[] = [
     { name: 'My List', href: '/my-list', icon: Bookmark, count: '24' },
     { name: 'Watch History', href: '/history', icon: Clock, count: '156' },
     { name: 'Continue Watching', href: '/continue', icon: Play, count: '8' },
@@ -81,7 +302,7 @@ const Footer: React.FC = () => {
     { name: 'Viewing Stats', href: '/stats', icon: BarChart3 },
   ];
 
-  const communityLinks = [
+  const communityLinks: LinkItem[] = [
     { name: 'Reviews & Ratings', href: '/reviews', icon: Star },
     { name: 'Discussion Forums', href: '/forums', icon: MessageCircle },
     { name: 'Watch Parties', href: '/watch-parties', icon: Users },
@@ -92,7 +313,7 @@ const Footer: React.FC = () => {
     { name: 'Fan Communities', href: '/communities', icon: Users },
   ];
 
-  const premiumFeatureLinks = [
+  const premiumFeatureLinks: LinkItem[] = [
     { name: 'Quality Settings', href: '/settings/quality', icon: Settings },
     { name: 'Download Management', href: '/settings/downloads', icon: Download },
     { name: 'Accessibility Options', href: '/settings/accessibility', icon: Accessibility },
@@ -100,7 +321,7 @@ const Footer: React.FC = () => {
     { name: 'Account Security', href: '/settings/security', icon: Lock },
   ];
 
-  const supportLinks = [
+  const supportLinks: LinkItem[] = [
     { name: 'Help Center', href: '/help', icon: HelpCircle },
     { name: 'Community Support', href: '/community-help', icon: Users },
     { name: 'Feature Requests', href: '/feature-requests', icon: Lightbulb },
@@ -108,7 +329,7 @@ const Footer: React.FC = () => {
     { name: 'Contact Us', href: '/contact', icon: MessageCircle },
   ];
 
-  const socialLinks = [
+  const socialLinks: LinkItem[] = [
     { name: 'Facebook', icon: Facebook, href: 'https://facebook.com/simoabidx', color: '#1877F2' },
     { name: 'Twitter', icon: Twitter, href: 'https://twitter.com/SeeMooAbid', color: '#1DA1F2' },
     { name: 'Instagram', icon: Instagram, href: 'https://instagram.com/simoabiid', color: '#E4405F' },
@@ -117,7 +338,7 @@ const Footer: React.FC = () => {
     { name: 'GitHub', icon: Github, href: 'https://github.com/simoabid', color: '#333' },
   ];
 
-  const quickActions = [
+  const quickActions: LinkItem[] = [
     { name: 'Search', icon: Search, action: () => {} },
     { name: 'Notifications', icon: Bell, action: () => {}, badge: '3' },
     { name: 'Profile', icon: User, action: () => {} },
@@ -127,86 +348,11 @@ const Footer: React.FC = () => {
     setExpandedSection(expandedSection === section ? null : section);
   };
 
-  const FooterSection = ({ 
-    title, 
-    links, 
-    sectionKey, 
-    showCounts = false, 
-    showBadges = false 
-  }: {
-    title: string;
-    links: any[];
-    sectionKey: string;
-    showCounts?: boolean;
-    showBadges?: boolean;
-  }) => {
-    const isExpanded = expandedSection === sectionKey;
-    
-    return (
-      <div className="footer-section">
-        <button
-          onClick={() => toggleSection(sectionKey)}
-          className="flex items-center justify-between w-full text-left group md:pointer-events-none"
-        >
-          <h3 className="text-lg font-semibold text-white mb-6 group-hover:text-netflix-red transition-colors duration-300 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-netflix-red" />
-            {title}
-          </h3>
-          <ChevronDown 
-            className={`w-5 h-5 text-gray-400 transition-transform duration-300 md:hidden ${
-              isExpanded ? 'rotate-180' : ''
-            }`} 
-          />
-        </button>
-        
-        <AnimatePresence>
-          {(isExpanded || typeof window !== 'undefined' && window.innerWidth >= 768) && (
-            <motion.ul
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="space-y-4"
-            >
-              {links.map((link, index) => (
-                <motion.li
-                  key={link.name}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <a
-                    href={link.href}
-                    className="group flex items-center gap-3 text-gray-400 hover:text-white transition-all duration-300 hover:translate-x-2"
-                  >
-                    <link.icon className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
-                    <span className="flex-1">{link.name}</span>
-                    {showCounts && link.count && (
-                      <span className="bg-netflix-red text-white text-xs px-2 py-1 rounded-full font-medium">
-                        {link.count}
-                      </span>
-                    )}
-                    {showBadges && link.badge && (
-                      <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-black text-xs px-2 py-1 rounded-full font-bold">
-                        {link.badge}
-                      </span>
-                    )}
-                  </a>
-                </motion.li>
-              ))}
-            </motion.ul>
-          )}
-        </AnimatePresence>
-      </div>
-    );
-  };
-
   return (
     <footer 
       id="cineflix-footer"
       className="relative bg-gradient-to-b from-[#0a0a0a] via-[#0d0d0d] to-[#111111] border-t border-gray-800/50 overflow-hidden"
     >
-      {/* Animated Background Pattern */}
       <div className="absolute inset-0 opacity-5">
         <div className="absolute inset-0 bg-gradient-to-br from-netflix-red/10 via-transparent to-netflix-red/5"></div>
         <motion.div
@@ -227,7 +373,6 @@ const Footer: React.FC = () => {
       </div>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Top Section - Brand and Quick Actions */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: isVisible ? 1 : 0, y: isVisible ? 0 : 20 }}
@@ -235,7 +380,6 @@ const Footer: React.FC = () => {
           className="py-12 border-b border-gray-800/50"
         >
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
-            {/* Enhanced Logo */}
             <div className="flex items-center gap-4">
               <div className="relative">
                 <motion.div
@@ -258,29 +402,12 @@ const Footer: React.FC = () => {
               </div>
             </div>
 
-            {/* Quick Actions */}
             <div className="flex items-center gap-4">
-              {quickActions.map((action) => (
-                <motion.button
-                  key={action.name}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="relative p-3 bg-gray-800/50 hover:bg-netflix-red/20 rounded-full transition-colors duration-300 group"
-                  onClick={action.action}
-                >
-                  <action.icon className="w-5 h-5 text-gray-400 group-hover:text-netflix-red transition-colors duration-300" />
-                  {action.badge && (
-                    <span className="absolute -top-1 -right-1 bg-netflix-red text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
-                      {action.badge}
-                    </span>
-                  )}
-                </motion.button>
-              ))}
+              {quickActions.map((action) => renderQuickAction(action))}
             </div>
           </div>
         </motion.div>
 
-        {/* Main Content Grid */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: isVisible ? 1 : 0, y: isVisible ? 0 : 30 }}
@@ -293,27 +420,34 @@ const Footer: React.FC = () => {
               links={smartBrowseLinks}
               sectionKey="browse"
               showBadges={true}
+              expandedSection={expandedSection}
+              toggleSection={toggleSection}
             />
             <FooterSection
               title="My CineFlix"
               links={myCineFlixLinks}
               sectionKey="mycineflix"
               showCounts={true}
+              expandedSection={expandedSection}
+              toggleSection={toggleSection}
             />
             <FooterSection
               title="Community & Social"
               links={communityLinks}
               sectionKey="community"
+              expandedSection={expandedSection}
+              toggleSection={toggleSection}
             />
             <FooterSection
               title="Premium Features"
               links={premiumFeatureLinks}
               sectionKey="premium"
+              expandedSection={expandedSection}
+              toggleSection={toggleSection}
             />
           </div>
         </motion.div>
 
-        {/* Enhanced Support Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: isVisible ? 1 : 0, y: isVisible ? 0 : 20 }}
@@ -321,7 +455,6 @@ const Footer: React.FC = () => {
           className="py-12 border-t border-gray-800/50"
         >
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {/* Support Links */}
             <div>
               <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
                 <HelpCircle className="w-5 h-5 text-netflix-red" />
@@ -334,7 +467,11 @@ const Footer: React.FC = () => {
                       href={link.href}
                       className="group flex items-center gap-3 text-gray-400 hover:text-white transition-all duration-300"
                     >
-                      <link.icon className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
+                      {link.icon ? (
+                        <link.icon className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
+                      ) : (
+                        <HelpCircle className="w-4 h-4 text-netflix-red group-hover:scale-110 transition-transform duration-300" />
+                      )}
                       {link.name}
                     </a>
                   </li>
@@ -342,7 +479,6 @@ const Footer: React.FC = () => {
               </ul>
             </div>
 
-            {/* Language & Accessibility */}
             <div>
               <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
                 <Globe className="w-5 h-5 text-netflix-red" />
@@ -372,36 +508,18 @@ const Footer: React.FC = () => {
               </div>
             </div>
 
-            {/* Social Media Enhanced */}
             <div>
               <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
                 <Share2 className="w-5 h-5 text-netflix-red" />
                 Connect With Us
               </h3>
               <div className="grid grid-cols-3 gap-4">
-                {socialLinks.map((social) => (
-                  <motion.a
-                    key={social.name}
-                    href={social.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    whileHover={{ scale: 1.1, y: -2 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="group p-4 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl transition-all duration-300 flex flex-col items-center gap-2"
-                    style={{ '--social-color': social.color } as any}
-                  >
-                    <social.icon className="w-6 h-6 text-gray-400 group-hover:text-white transition-colors duration-300" />
-                    <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors duration-300">
-                      {social.name}
-                    </span>
-                  </motion.a>
-                ))}
+                {socialLinks.map((socialLink) => renderSocialItem(socialLink))}
               </div>
             </div>
           </div>
         </motion.div>
 
-        {/* Bottom Section - Legal & Copyright */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: isVisible ? 1 : 0 }}
@@ -422,7 +540,6 @@ const Footer: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Floating Back to Top Button */}
         <motion.button
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: isVisible ? 1 : 0, y: isVisible ? 0 : 20 }}

@@ -28,10 +28,213 @@ import MovieDetails from '../components/WatchPage/MovieDetails';
 import SimilarContent from '../components/WatchPage/SimilarContent';
 import UserRating from '../components/WatchPage/UserRating';
 
-
 interface WatchPageProps {
   type: 'movie' | 'tv';
 }
+
+/**
+ * Validate and parse a route id parameter.
+ * Returns a positive integer id or null if invalid.
+ * Exported to allow unit testing of validation behavior.
+ * @param idParam - route id param (string | undefined)
+ */
+export function validateAndParseId(idParam?: string | undefined): number | null {
+  if (!idParam) return null;
+  const parsed = Number(idParam);
+  if (!Number.isFinite(parsed) || isNaN(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Select a sensible default source from a list of stream sources.
+ * Prioritizes vidjoy_player, rivestream_server_2, Premium reliability, then first available.
+ * Exported for testability as a pure function.
+ * @param sources - array of stream sources
+ */
+export function selectDefaultSource(sources: StreamSource[] | null): StreamSource | null {
+  if (!sources || sources.length === 0) return null;
+  return sources.find(s => s.id === 'vidjoy_player') ||
+         sources.find(s => s.id === 'rivestream_server_2') ||
+         sources.find(s => s.reliability === 'Premium') ||
+         sources[0];
+}
+
+/**
+ * Transform raw third-party source entries into standardized StreamSource objects.
+ * Exported for testability. This function assumes the shape of the input
+ * is similar to what SmashyStreamService / Movies111Service produce.
+ * @param rawSources - raw sources array from provider
+ * @param subtitleProvider - function that returns supported subtitles
+ */
+export function transformProviderSources(rawSources: any[] = [], subtitleProvider: () => string[] = () => []): StreamSource[] {
+  return (rawSources || []).map(source => ({
+    id: source.id,
+    name: source.name,
+    url: source.url,
+    type: source.type,
+    quality: source.quality,
+    fileSize: source.fileSize,
+    reliability: source.reliability,
+    isAdFree: source.isAdFree,
+    language: source.language,
+    subtitles: subtitleProvider()
+  }));
+}
+
+/**
+ * Fetch all stream, download and torrent sources for a piece of content.
+ * This is the orchestrator extracted from component logic. It returns a normalized
+ * result object and does not mutate component state. It includes validation of
+ * incoming params and will throw informative errors for the caller to handle.
+ * Exported for unit testing.
+ * @param options - object containing contentId, type, season, episode
+ */
+export async function fetchAllSources(options: {
+  contentId: number;
+  type: 'movie' | 'tv';
+  season?: number;
+  episode?: number;
+}): Promise<{
+  streamSources: StreamSource[];
+  downloadOptions: DownloadOption[];
+  torrentSources: TorrentSource[];
+}> {
+  const { contentId, type, season, episode } = options;
+
+  if (!contentId || !Number.isInteger(contentId) || contentId <= 0) {
+    throw new Error('Invalid contentId provided to fetchAllSources');
+  }
+  if (type !== 'movie' && type !== 'tv') {
+    throw new Error('Invalid content type provided to fetchAllSources');
+  }
+
+  // Acquire rivestream data from service (may throw)
+  const rivestreamOptions: any = {
+    contentType: type,
+    tmdbId: contentId
+  };
+  if (type === 'tv') {
+    rivestreamOptions.season = season;
+    rivestreamOptions.episode = episode;
+  }
+
+  const rivestreamResult = await rivestreamService.getAllContentData(rivestreamOptions);
+  const rivestreamSources: StreamSource[] = rivestreamResult.streamSources || [];
+  const downloadOptions: DownloadOption[] = rivestreamResult.downloadOptions || [];
+  const torrentSources: TorrentSource[] = rivestreamResult.torrentSources || [];
+
+  // Attempt to gather SmashyStream sources (non-blocking)
+  let smashyStreamSources: StreamSource[] = [];
+  try {
+    if (type === 'movie') {
+      const raw = SmashyStreamService.generateMovieSources(contentId);
+      smashyStreamSources = transformProviderSources(raw, SmashyStreamService.getSupportedSubtitleLanguages);
+    } else {
+      const raw = SmashyStreamService.generateTVSource(contentId, season || 1, episode || 1);
+      smashyStreamSources = transformProviderSources(raw, SmashyStreamService.getSupportedSubtitleLanguages);
+    }
+  } catch (err) {
+    // swallow provider-specific errors to allow fallbacks; caller handles logging
+  }
+
+  // Attempt to gather Movies111 sources (non-blocking)
+  let movies111Sources: StreamSource[] = [];
+  try {
+    if (type === 'movie') {
+      const raw = Movies111Service.generateMovieSources(contentId);
+      movies111Sources = transformProviderSources(raw, Movies111Service.getSupportedSubtitleLanguages);
+    } else {
+      const raw = Movies111Service.generateTVSource(contentId, season || 1, episode || 1);
+      movies111Sources = transformProviderSources(raw, Movies111Service.getSupportedSubtitleLanguages);
+    }
+  } catch (err) {
+    // swallow provider-specific errors to allow fallbacks; caller handles logging
+  }
+
+  const allStreamSources = [...(rivestreamSources || []), ...smashyStreamSources, ...movies111Sources];
+
+  return {
+    streamSources: allStreamSources,
+    downloadOptions: downloadOptions || [],
+    torrentSources: torrentSources || []
+  };
+}
+
+/**
+ * Fetch content details, videos and similar content in parallel.
+ * Validates responses and throws if the minimal expected fields are missing.
+ * Exported for testing.
+ * @param contentId - numeric TMDB id
+ * @param type - 'movie' | 'tv'
+ */
+export async function fetchContentData(contentId: number, type: 'movie' | 'tv'): Promise<{
+  contentData: Movie | TVShow;
+  videosData: Video[];
+  similarData: { results: (Movie | TVShow)[] } | any;
+}> {
+  if (!contentId || !Number.isInteger(contentId) || contentId <= 0) {
+    throw new Error('Invalid contentId provided to fetchContentData');
+  }
+
+  let contentData: Movie | TVShow;
+  let videosData: Video[];
+  let similarData: any;
+
+  if (type === 'movie') {
+    [contentData, videosData, similarData] = await Promise.all([
+      getMovieDetails(contentId),
+      getMovieVideos(contentId),
+      getSimilarMovies(contentId)
+    ]);
+  } else {
+    [contentData, videosData, similarData] = await Promise.all([
+      getTVShowDetails(contentId),
+      getTVShowVideos(contentId),
+      getSimilarTVShows(contentId)
+    ]);
+  }
+
+  // Basic validation of returned content
+  if (!contentData || typeof (contentData as any).id !== 'number') {
+    throw new Error('Content data is missing or invalid from TMDB');
+  }
+  if (!Array.isArray(videosData)) {
+    videosData = [];
+  }
+  if (!similarData) {
+    similarData = { results: [] };
+  }
+
+  return { contentData, videosData, similarData };
+}
+
+/**
+ * Centralized error panel used across the watch page and intended for use
+ * by route/loader error boundaries. Exported so route-level error handlers
+ * can render a consistent UI for failures.
+ * @param props.message - human readable error message to display
+ * @param props.onRetry - optional retry callback to allow the host to retry loading
+ */
+export const ErrorPanel: React.FC<{ message: string; onRetry?: () => void }> = ({ message, onRetry }) => (
+  <div className="min-h-screen bg-[#0f0f0f] pt-16 flex items-center justify-center">
+    <div className="text-center">
+      <h2 className="text-2xl font-bold text-white mb-4">Content Not Found</h2>
+      <p className="text-gray-400 mb-6">{message}</p>
+      <div className="flex items-center justify-center gap-4">
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="bg-[#ff0000] text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+);
 
 const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
   const { id } = useParams<{ id: string }>();
@@ -63,121 +266,40 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
   const [selectedEpisode, setSelectedEpisode] = useState<number>(1);
 
-  // Function to fetch all streaming sources
+  // Wrapper around the orchestrator to update component state.
+  // Kept as a stable reference inside the component.
   const fetchStreamingSources = async (contentId: number) => {
     if (!contentId) return;
 
     try {
       setSourcesLoading(true);
       setSourcesError(null);
-      
-      const rivestreamOptions = {
-        contentType: type,
-        tmdbId: contentId,
-        ...(type === 'tv' && { season: selectedSeason, episode: selectedEpisode })
-      };
 
-      // Fetch Rivestream sources
-      const { streamSources: rivestreamSources, downloadOptions, torrentSources } = await rivestreamService.getAllContentData(rivestreamOptions);
-      
-      // Generate SmashyStream sources (always generate with TMDB ID)
-      let smashyStreamSources: StreamSource[] = [];
-      try {
-        if (type === 'movie') {
-          // Generate with TMDB ID (always available)
-          smashyStreamSources = SmashyStreamService.generateMovieSources(contentId).map(source => ({
-            id: source.id,
-            name: source.name,
-            url: source.url,
-            type: source.type,
-            quality: source.quality,
-            fileSize: source.fileSize,
-            reliability: source.reliability,
-            isAdFree: source.isAdFree,
-            language: source.language,
-            subtitles: SmashyStreamService.getSupportedSubtitleLanguages()
-          }));
-        } else if (type === 'tv') {
-          // Generate with TMDB ID (always available)
-          smashyStreamSources = SmashyStreamService.generateTVSource(contentId, selectedSeason, selectedEpisode).map(source => ({
-            id: source.id,
-            name: source.name,
-            url: source.url,
-            type: source.type,
-            quality: source.quality,
-            fileSize: source.fileSize,
-            reliability: source.reliability,
-            isAdFree: source.isAdFree,
-            language: source.language,
-            subtitles: SmashyStreamService.getSupportedSubtitleLanguages()
-          }));
-        }
-        
-      } catch (smashyError) {
-        console.warn('SmashyStream sources unavailable:', smashyError);
-      }
+      const { streamSources: fetchedStreamSources, downloadOptions: fetchedDownloads, torrentSources: fetchedTorrents } =
+        await fetchAllSources({
+          contentId,
+          type,
+          season: selectedSeason,
+          episode: selectedEpisode
+        });
 
-      // Generate 111movies sources (always generate with TMDB ID)
-      let movies111Sources: StreamSource[] = [];
-      try {
-        if (type === 'movie') {
-          movies111Sources = Movies111Service.generateMovieSources(contentId).map(source => ({
-            id: source.id,
-            name: source.name,
-            url: source.url,
-            type: source.type,
-            quality: source.quality,
-            fileSize: source.fileSize,
-            reliability: source.reliability,
-            isAdFree: source.isAdFree,
-            language: source.language,
-            subtitles: Movies111Service.getSupportedSubtitleLanguages()
-          }));
-        } else if (type === 'tv') {
-          movies111Sources = Movies111Service.generateTVSource(contentId, selectedSeason, selectedEpisode).map(source => ({
-            id: source.id,
-            name: source.name,
-            url: source.url,
-            type: source.type,
-            quality: source.quality,
-            fileSize: source.fileSize,
-            reliability: source.reliability,
-            isAdFree: source.isAdFree,
-            language: source.language,
-            subtitles: Movies111Service.getSupportedSubtitleLanguages()
-          }));
-        }
-      } catch (movies111Error) {
-        console.warn('111movies sources unavailable:', movies111Error);
-      }
-
-      // Combine all stream sources
-      const allStreamSources = [...rivestreamSources, ...smashyStreamSources, ...movies111Sources];
-      
-      if (allStreamSources.length === 0 && downloadOptions.length === 0 && torrentSources.length === 0) {
+      // Fallback behavior if no sources
+      if ((fetchedStreamSources?.length || 0) === 0 && (fetchedDownloads?.length || 0) === 0 && (fetchedTorrents?.length || 0) === 0) {
         throw new Error('No streaming sources available for this content');
       }
 
-      setStreamSources(allStreamSources);
-      setDownloadOptions(downloadOptions);
-      setTorrentSources(torrentSources);
+      setStreamSources(fetchedStreamSources);
+      setDownloadOptions(fetchedDownloads);
+      setTorrentSources(fetchedTorrents);
 
-      // Auto-select Vidjoy as default, then fallback to other premium sources
-      if (allStreamSources.length > 0) {
-        const defaultSource = allStreamSources.find(s => s.id === 'vidjoy_player') || 
-                             allStreamSources.find(s => s.id === 'rivestream_server_2') || 
-                             allStreamSources.find(s => s.reliability === 'Premium') || 
-                             allStreamSources[0];
-        setSelectedSource(defaultSource);
-      } else {
-        setSelectedSource(null);
-      }
+      const defaultSource = selectDefaultSource(fetchedStreamSources);
+      setSelectedSource(defaultSource);
+    } catch (err) {
+      console.error('Error fetching streaming sources:', err);
+      const message = err instanceof Error ? err.message : 'Failed to load streaming sources';
+      setSourcesError(message);
 
-    } catch (error) {
-      console.error('Error fetching streaming sources:', error);
-      setSourcesError(error instanceof Error ? error.message : 'Failed to load streaming sources');
-      
-      // Fallback: provide basic sources even if API fails
+      // Provide defensive fallback sources so UI remains usable
       const fallbackSources: StreamSource[] = [
         {
           id: 'vidjoy_player',
@@ -205,143 +327,125 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
         }
       ];
 
-      // Add SmashyStream fallback sources
+      // Try to append provider fallbacks but don't fail if they error
       try {
-        let smashyFallback: any[] = [];
+        let raw: any[] = [];
         if (type === 'movie') {
-          smashyFallback = SmashyStreamService.generateMovieSources(contentId);
-        } else if (type === 'tv') {
-          smashyFallback = SmashyStreamService.generateTVSource(contentId, selectedSeason, selectedEpisode);
+          raw = SmashyStreamService.generateMovieSources(contentId);
+        } else {
+          raw = SmashyStreamService.generateTVSource(contentId, selectedSeason, selectedEpisode);
         }
-        
-        const smashyFallbackSources = smashyFallback.map(source => ({
-          id: source.id,
-          name: source.name,
-          url: source.url,
-          type: source.type,
-          quality: source.quality,
-          fileSize: source.fileSize,
-          reliability: source.reliability,
-          isAdFree: source.isAdFree,
-          language: source.language,
-          subtitles: SmashyStreamService.getSupportedSubtitleLanguages()
-        }));
-        
-        fallbackSources.push(...smashyFallbackSources);
+        fallbackSources.push(...transformProviderSources(raw, SmashyStreamService.getSupportedSubtitleLanguages));
       } catch (fallbackError) {
         console.warn('SmashyStream fallback failed:', fallbackError);
       }
 
-      // Add 111movies fallback sources
       try {
-        let movies111Fallback: any[] = [];
+        let raw: any[] = [];
         if (type === 'movie') {
-          movies111Fallback = Movies111Service.generateMovieSources(contentId);
-        } else if (type === 'tv') {
-          movies111Fallback = Movies111Service.generateTVSource(contentId, selectedSeason, selectedEpisode);
+          raw = Movies111Service.generateMovieSources(contentId);
+        } else {
+          raw = Movies111Service.generateTVSource(contentId, selectedSeason, selectedEpisode);
         }
-        
-        const movies111FallbackSources = movies111Fallback.map(source => ({
-          id: source.id,
-          name: source.name,
-          url: source.url,
-          type: source.type,
-          quality: source.quality,
-          fileSize: source.fileSize,
-          reliability: source.reliability,
-          isAdFree: source.isAdFree,
-          language: source.language,
-          subtitles: Movies111Service.getSupportedSubtitleLanguages()
-        }));
-        
-        fallbackSources.push(...movies111FallbackSources);
+        fallbackSources.push(...transformProviderSources(raw, Movies111Service.getSupportedSubtitleLanguages));
       } catch (fallbackError) {
         console.warn('111movies fallback failed:', fallbackError);
       }
 
       setStreamSources(fallbackSources);
+      setDownloadOptions([]);
+      setTorrentSources([]);
+      setSelectedSource(selectDefaultSource(fallbackSources));
     } finally {
       setSourcesLoading(false);
     }
   };
 
   useEffect(() => {
-    const fetchContent = async () => {
-      if (!id) return;
+    let isMounted = true;
 
+    const fetchContent = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const contentId = parseInt(id);
-        let contentData: Movie | TVShow;
-        let videosData: Video[];
-        let similarData: (Movie | TVShow)[];
-
-        if (type === 'movie') {
-          [contentData, videosData, similarData] = await Promise.all([
-            getMovieDetails(contentId),
-            getMovieVideos(contentId),
-            getSimilarMovies(contentId)
-          ]);
-        } else {
-          [contentData, videosData, similarData] = await Promise.all([
-            getTVShowDetails(contentId),
-            getTVShowVideos(contentId),
-            getSimilarTVShows(contentId)
-          ]);
+        const contentId = validateAndParseId(id);
+        if (!contentId) {
+          setError('Invalid content identifier.');
+          setLoading(false);
+          return;
         }
 
+        const { contentData, videosData, similarData } = await fetchContentData(contentId, type);
+
+        if (!isMounted) return;
+
         setContent(contentData);
-        setVideos(videosData);
+        setVideos(videosData || []);
         setSimilarContent(similarData.results || []);
 
-        // Load watch progress from localStorage
-        const savedProgress = localStorage.getItem(`watch_progress_${type}_${contentId}`);
-        if (savedProgress) {
-          setWatchProgress(JSON.parse(savedProgress));
+        // Load watch progress from localStorage (defensive parsing)
+        try {
+          const savedProgress = localStorage.getItem(`watch_progress_${type}_${contentId}`);
+          if (savedProgress) {
+            setWatchProgress(JSON.parse(savedProgress));
+          }
+        } catch (storageErr) {
+          console.warn('Failed to parse saved watch progress:', storageErr);
         }
 
         // Load user rating from localStorage
-        const savedRating = localStorage.getItem(`user_rating_${type}_${contentId}`);
-        if (savedRating) {
-          setUserRating(parseInt(savedRating));
+        try {
+          const savedRating = localStorage.getItem(`user_rating_${type}_${contentId}`);
+          if (savedRating) {
+            setUserRating(parseInt(savedRating));
+          }
+        } catch (storageErr) {
+          console.warn('Failed to parse saved user rating:', storageErr);
         }
 
         // Check if content is liked
-        setIsLiked(myListService.isLiked(contentId, type));
+        try {
+          setIsLiked(myListService.isLiked((contentData as any).id, type));
+        } catch (listErr) {
+          console.warn('Failed to check like status:', listErr);
+        }
 
-        // Fetch Rivestream sources
-        await fetchStreamingSources(contentId);
-
+        // Fetch streaming sources
+        await fetchStreamingSources((contentData as any).id);
       } catch (err) {
         console.error('Error fetching content:', err);
-        setError('Failed to load content. Please try again.');
+        const message = err instanceof Error ? err.message : 'Failed to load content. Please try again.';
+        if (isMounted) setError(message);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchContent();
-  }, [id, type]);
 
-  // Separate useEffect for TV show episode changes
+    return () => {
+      isMounted = false;
+    };
+    // contentId (id) and type are the primary external inputs; keep dependency array explicit
+  }, [id, type, selectedSeason, selectedEpisode]);
+
+  // Separate useEffect for TV show episode/season changes to refetch sources only
   useEffect(() => {
     if (content && type === 'tv') {
-      fetchStreamingSources(content.id);
+      fetchStreamingSources((content as any).id);
     }
-  }, [selectedSeason, selectedEpisode]);
-
-
+    // Only refetch when season/episode change or content/type changes
+  }, [selectedSeason, selectedEpisode, content, type]);
 
   const handleAddToList = () => {
     if (!content) return;
 
-    if (isInList(content.id, type)) {
+    if (isInList((content as any).id, type)) {
       // Find the item to remove by content ID
       const items = myListService.getMyList();
       const itemToRemove = items.find(item => 
-        item.contentId === content.id && item.contentType === type
+        item.contentId === (content as any).id && item.contentType === type
       );
       if (itemToRemove) {
         removeFromList(itemToRemove.id);
@@ -356,7 +460,7 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
     
     try {
       if (isLiked) {
-        myListService.unlikeContent(content.id, type);
+        myListService.unlikeContent((content as any).id, type);
         setIsLiked(false);
       } else {
         myListService.likeContent(content, type);
@@ -364,19 +468,22 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
       }
     } catch (error) {
       console.error('Error toggling like:', error);
+      setError('Failed to update like status.');
     }
   };
 
   const handleShare = () => {
     if (navigator.share && content) {
       navigator.share({
-        title: content.title || content.name,
-        text: content.overview,
+        title: (content as any).title || (content as any).name,
+        text: (content as any).overview,
         url: window.location.href
       });
     } else {
       // Fallback: copy to clipboard
-      navigator.clipboard.writeText(window.location.href);
+      navigator.clipboard.writeText(window.location.href).catch(() => {
+        console.log('Copy to clipboard failed');
+      });
       // Show toast notification
       console.log('Link copied to clipboard');
     }
@@ -384,7 +491,14 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
 
   const handleRating = (rating: number) => {
     setUserRating(rating);
-    localStorage.setItem(`user_rating_${type}_${id}`, rating.toString());
+    try {
+      const contentIdKey = validateAndParseId(id) ?? null;
+      if (contentIdKey) {
+        localStorage.setItem(`user_rating_${type}_${contentIdKey}`, rating.toString());
+      }
+    } catch (err) {
+      console.warn('Failed to save user rating:', err);
+    }
   };
 
   if (loading) {
@@ -396,24 +510,20 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
   }
 
   if (error || !content) {
-    return (
-      <div className="min-h-screen bg-[#0f0f0f] pt-16 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-white mb-4">Content Not Found</h2>
-          <p className="text-gray-400 mb-6">{error || 'The requested content could not be found.'}</p>
-          <button
-            onClick={() => navigate(-1)}
-            className="bg-[#ff0000] text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
+    return <ErrorPanel message={error || 'The requested content could not be found.'} onRetry={() => {
+      // Retry triggers the same effect by navigating to the same route programmatically (re-mount)
+      // or simply re-invoking fetchStreamingSources if content is present.
+      if (content) {
+        fetchStreamingSources((content as any).id);
+      } else {
+        // Try to re-parse id and re-run effect by forcing a navigation to same path
+        navigate(0);
+      }
+    }} />;
   }
 
-  const title = content.title || content.name || '';
-  const releaseDate = content.release_date || content.first_air_date || '';
+  const title = (content as any).title || (content as any).name || '';
+  const releaseDate = (content as any).release_date || (content as any).first_air_date || '';
   const runtime = type === 'movie' ? (content as Movie).runtime : (content as TVShow).episode_run_time?.[0];
   const trailer = videos.find(v => v.type === 'Trailer') || videos[0];
 
@@ -452,7 +562,7 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                <Heart className={`h-5 w-5 ${isInList(content.id, type) ? 'text-[#ff0000] fill-current' : ''}`} />
+                <Heart className={`h-5 w-5 ${isInList((content as any).id, type) ? 'text-[#ff0000] fill-current' : ''}`} />
               </motion.button>
               <motion.button
                 onClick={handleLike}
@@ -624,7 +734,7 @@ const WatchPage: React.FC<WatchPageProps> = ({ type }) => {
                 </div>
                 <p className="text-red-300 text-sm">{sourcesError}</p>
                 <button
-                  onClick={() => content && fetchRivestreamSources(content.id)}
+                  onClick={() => content && fetchStreamingSources((content as any).id)}
                   className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
                 >
                   Retry Loading Sources

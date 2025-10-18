@@ -21,16 +21,259 @@ interface TorrentSourcesProps {
   sources: TorrentSource[];
 }
 
+/**
+ * Centralized sanitization and validation for a raw torrent source object.
+ * Throws an Error when required fields are missing or have invalid types.
+ *
+ * This function is a pure, runtime guard that ensures downstream code can
+ * safely assume the returned object conforms to the TorrentSource shape.
+ *
+ * @param raw - unknown input expected to represent a TorrentSource
+ * @returns a validated TorrentSource
+ */
+export function sanitizeTorrentSource(raw: any): TorrentSource {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Invalid torrent source: not an object');
+  }
+
+  const ensureString = (key: string, allowEmpty = false) => {
+    const val = raw[key];
+    if (val === undefined || val === null) {
+      throw new Error(`Missing required field: ${key}`);
+    }
+    if (typeof val !== 'string') {
+      throw new Error(`Invalid type for field ${key}: expected string`);
+    }
+    if (!allowEmpty && val.trim() === '') {
+      throw new Error(`Empty value for required field: ${key}`);
+    }
+    return val;
+  };
+
+  const ensureNumber = (key: string) => {
+    const val = raw[key];
+    if (val === undefined || val === null) {
+      throw new Error(`Missing required field: ${key}`);
+    }
+    if (typeof val !== 'number' || Number.isNaN(val)) {
+      throw new Error(`Invalid type for field ${key}: expected number`);
+    }
+    return val;
+  };
+
+  // Required fields
+  const id = ensureString('id');
+  const name = ensureString('name');
+  const magnetLink = ensureString('magnetLink');
+  const fileSize = ensureString('fileSize', true);
+  const uploadDate = ensureString('uploadDate');
+  const quality = ensureString('quality');
+  const health = ensureString('health');
+  const seeders = ensureNumber('seeders');
+  const leechers = ensureNumber('leechers');
+
+  // Optional fields
+  const isTrusted = Boolean(raw.isTrusted);
+  const torrentFileUrl = raw.torrentFileUrl !== undefined && raw.torrentFileUrl !== null ? String(raw.torrentFileUrl) : undefined;
+  const releaseGroup = raw.releaseGroup !== undefined && raw.releaseGroup !== null ? String(raw.releaseGroup) : undefined;
+  const uploadedBy = raw.uploadedBy !== undefined && raw.uploadedBy !== null ? String(raw.uploadedBy) : undefined;
+
+  return {
+    id,
+    name,
+    magnetLink,
+    fileSize,
+    uploadDate,
+    quality,
+    health,
+    seeders,
+    leechers,
+    isTrusted,
+    torrentFileUrl,
+    releaseGroup,
+    uploadedBy
+  } as TorrentSource;
+}
+
+/**
+ * Parse and validate a raw torrent source object at runtime.
+ * Delegates to sanitizeTorrentSource to centralize validation logic.
+ *
+ * @param raw - raw input to validate as a TorrentSource
+ * @returns a validated TorrentSource
+ */
+export function parseTorrentSource(raw: any): TorrentSource {
+  return sanitizeTorrentSource(raw);
+}
+
+/**
+ * Safely parse an array of raw sources into validated TorrentSource objects.
+ * Non-conforming entries are skipped and an error is logged for each.
+ *
+ * @param rawSources - array of unknown items to validate
+ * @returns array of validated TorrentSource
+ */
+export function parseTorrentSources(rawSources: unknown[]): TorrentSource[] {
+  if (!Array.isArray(rawSources)) {
+    throw new Error('Sources must be an array');
+  }
+  const parsed: TorrentSource[] = [];
+  for (const raw of rawSources) {
+    try {
+      parsed.push(parseTorrentSource(raw));
+    } catch (err) {
+      // Explicit error handling for malformed source; continue processing remaining sources.
+      // In real app, consider reporting these to a monitoring service.
+      // eslint-disable-next-line no-console
+      console.error('Skipping malformed torrent source:', err);
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Map quality string to Tailwind CSS classes.
+ *
+ * @param quality - quality label from the source
+ * @returns css classes for display
+ */
+export function getQualityColor(quality: string) {
+  switch (quality) {
+    case 'BluRay':
+      return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
+    case 'WEBRip':
+      return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
+    case 'HDRip':
+      return 'text-green-400 bg-green-500/20 border-green-500/30';
+    case 'TS':
+      return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30';
+    case 'CAM':
+      return 'text-red-400 bg-red-500/20 border-red-500/30';
+    default:
+      return 'text-gray-400 bg-gray-500/20 border-gray-500/30';
+  }
+}
+
+/**
+ * Map health label to a text color class.
+ *
+ * @param health - health label from the source
+ * @returns css class for color
+ */
+export function getHealthColor(health: string) {
+  switch (health) {
+    case 'Excellent':
+      return 'text-green-400';
+    case 'Good':
+      return 'text-blue-400';
+    case 'Fair':
+      return 'text-yellow-400';
+    case 'Poor':
+      return 'text-red-400';
+    default:
+      return 'text-gray-400';
+  }
+}
+
+/**
+ * Return an icon component matching the health label.
+ *
+ * @param health - health label from the source
+ * @returns JSX element representing the health icon
+ */
+export function getHealthIcon(health: string) {
+  switch (health) {
+    case 'Excellent':
+      return <Signal className="h-4 w-4 text-green-400" />;
+    case 'Good':
+      return <Signal className="h-4 w-4 text-blue-400" />;
+    case 'Fair':
+      return <Signal className="h-4 w-4 text-yellow-400" />;
+    case 'Poor':
+      return <Signal className="h-4 w-4 text-red-400" />;
+    default:
+      return <Signal className="h-4 w-4 text-gray-400" />;
+  }
+}
+
+/**
+ * Compute seeder ratio as a percentage string with one decimal.
+ *
+ * @param seeders - number of seeders
+ * @param leechers - number of leechers
+ * @returns percentage string (e.g., "75.0")
+ */
+export function getSeederRatio(seeders: number, leechers: number) {
+  const total = seeders + leechers;
+  return total > 0 ? ((seeders / total) * 100).toFixed(1) : '0';
+}
+
+/**
+ * Compare two TorrentSource objects according to a sort key.
+ * Exported so sorting logic is centralized and testable.
+ *
+ * Note: This function mirrors the original sorting logic used in the component.
+ * Defensive guards ensure both items are provided; if not, it falls back to 0.
+ *
+ * @param a - first torrent source
+ * @param b - second torrent source
+ * @param sortBy - sorting criterion ('seeders' | 'size' | 'date' | 'quality')
+ * @returns negative if a < b, positive if a > b, zero if equal
+ */
+export function compareTorrentSources(
+  a: TorrentSource,
+  b: TorrentSource,
+  sortBy: 'seeders' | 'size' | 'date' | 'quality'
+) {
+  if (!a || !b) return 0;
+
+  switch (sortBy) {
+    case 'seeders':
+      return b.seeders - a.seeders;
+    case 'size':
+      return parseFloat(b.fileSize) - parseFloat(a.fileSize);
+    case 'date':
+      return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime();
+    case 'quality':
+      const qualityOrder: Record<string, number> = { 'BluRay': 5, 'WEBRip': 4, 'HDRip': 3, 'TS': 2, 'CAM': 1 };
+      return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
+    default:
+      return 0;
+  }
+}
+
 const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
   const [sortBy, setSortBy] = useState<'seeders' | 'size' | 'date' | 'quality'>('seeders');
 
+  // Runtime-validate and sanitize incoming sources for robustness.
+  let validatedSources: TorrentSource[] = [];
+  try {
+    validatedSources = parseTorrentSources(sources as unknown[]);
+  } catch (err) {
+    // If the whole sources payload is invalid, log and fall back to empty array.
+    // eslint-disable-next-line no-console
+    console.error('Invalid sources provided to TorrentSources component:', err);
+    validatedSources = [];
+  }
+
   const handleMagnetLink = (magnetLink: string) => {
     // Open magnet link with default torrent client
+    // Guard for malformed magnet links
+    if (!magnetLink || typeof magnetLink !== 'string') {
+      // eslint-disable-next-line no-console
+      console.error('Invalid magnet link:', magnetLink);
+      return;
+    }
     window.location.href = magnetLink;
   };
 
   const handleTorrentDownload = (torrentUrl: string) => {
     // Download torrent file
+    if (!torrentUrl || typeof torrentUrl !== 'string') {
+      // eslint-disable-next-line no-console
+      console.error('Invalid torrent file URL:', torrentUrl);
+      return;
+    }
     const link = document.createElement('a');
     link.href = torrentUrl;
     link.download = 'movie.torrent';
@@ -40,82 +283,35 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
   };
 
   const copyMagnetLink = async (magnetLink: string) => {
+    if (!magnetLink || typeof magnetLink !== 'string') {
+      // eslint-disable-next-line no-console
+      console.error('Invalid magnet link to copy:', magnetLink);
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(magnetLink);
-      // In a real app, show toast notification
-      console.log('Magnet link copied to clipboard');
+      if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(magnetLink);
+        // In a real app, show toast notification
+        // eslint-disable-next-line no-console
+        console.log('Magnet link copied to clipboard');
+      } else {
+        // Fallback for environments without clipboard API
+        const textarea = document.createElement('textarea');
+        textarea.value = magnetLink;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        // eslint-disable-next-line no-console
+        console.log('Magnet link copied to clipboard (fallback)');
+      }
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Failed to copy magnet link:', error);
     }
   };
 
-  const getQualityColor = (quality: string) => {
-    switch (quality) {
-      case 'BluRay':
-        return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
-      case 'WEBRip':
-        return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
-      case 'HDRip':
-        return 'text-green-400 bg-green-500/20 border-green-500/30';
-      case 'TS':
-        return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30';
-      case 'CAM':
-        return 'text-red-400 bg-red-500/20 border-red-500/30';
-      default:
-        return 'text-gray-400 bg-gray-500/20 border-gray-500/30';
-    }
-  };
-
-  const getHealthColor = (health: string) => {
-    switch (health) {
-      case 'Excellent':
-        return 'text-green-400';
-      case 'Good':
-        return 'text-blue-400';
-      case 'Fair':
-        return 'text-yellow-400';
-      case 'Poor':
-        return 'text-red-400';
-      default:
-        return 'text-gray-400';
-    }
-  };
-
-  const getHealthIcon = (health: string) => {
-    switch (health) {
-      case 'Excellent':
-        return <Signal className="h-4 w-4 text-green-400" />;
-      case 'Good':
-        return <Signal className="h-4 w-4 text-blue-400" />;
-      case 'Fair':
-        return <Signal className="h-4 w-4 text-yellow-400" />;
-      case 'Poor':
-        return <Signal className="h-4 w-4 text-red-400" />;
-      default:
-        return <Signal className="h-4 w-4 text-gray-400" />;
-    }
-  };
-
-  const getSeederRatio = (seeders: number, leechers: number) => {
-    const total = seeders + leechers;
-    return total > 0 ? ((seeders / total) * 100).toFixed(1) : '0';
-  };
-
-  const sortedSources = [...sources].sort((a, b) => {
-    switch (sortBy) {
-      case 'seeders':
-        return b.seeders - a.seeders;
-      case 'size':
-        return parseFloat(b.fileSize) - parseFloat(a.fileSize);
-      case 'date':
-        return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime();
-      case 'quality':
-        const qualityOrder = { 'BluRay': 5, 'WEBRip': 4, 'HDRip': 3, 'TS': 2, 'CAM': 1 };
-        return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
-      default:
-        return 0;
-    }
-  });
+  const sortedSources = [...validatedSources].sort((a, b) => compareTorrentSources(a, b, sortBy));
 
   return (
     <div className="space-y-6">
@@ -125,7 +321,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
           <Search className="h-6 w-6 text-[#ff0000]" />
           <h2 className="text-2xl font-bold text-white">Torrent Sources</h2>
           <span className="px-2 py-1 bg-[#ff0000] text-white text-sm rounded-full">
-            {sources.length} Available
+            {validatedSources.length} Available
           </span>
         </div>
         

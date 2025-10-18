@@ -33,17 +33,206 @@ import LikeButton from '../components/LikeButton';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import TimelineView from '../components/TimelineView';
 
-type TabType = 'overview' | 'movies' | 'timeline' | 'cast' | 'trivia' | 'related';
-type ViewMode = 'grid' | 'list' | 'timeline';
-type SortOption = 'release' | 'chronological' | 'rating' | 'title';
+export type TabType = 'overview' | 'movies' | 'timeline' | 'cast' | 'trivia' | 'related';
+export type ViewMode = 'grid' | 'list' | 'timeline';
+export type SortOption = 'release' | 'chronological' | 'rating' | 'title';
 
-const CollectionDetailPage: React.FC = () => {
+/**
+ * A loader function that fetches collection details by id.
+ */
+export type CollectionLoader = (id: number) => Promise<CollectionDetails>;
+
+/**
+ * Props for CollectionDetailPage.
+ * - initialCollection: optionally seed the page with a collection object (will be validated).
+ * - loader: optionally provide a custom loader function for fetching collection details (defaults to internal service).
+ */
+export type CollectionDetailPageProps = {
+  initialCollection?: CollectionDetails | null;
+  loader?: CollectionLoader;
+};
+
+/**
+ * Validate that a value conforms to the minimal CollectionDetails shape
+ * required by this component. This central guard consolidates response
+ * validation and provides a single place to update validation rules.
+ *
+ * @param value - unknown value to validate as CollectionDetails
+ * @returns true if the value appears to be a valid CollectionDetails object
+ */
+export const isValidCollection = (value: unknown): value is CollectionDetails => {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Partial<CollectionDetails>;
+  if (typeof v.id !== 'number') return false;
+  if (!Array.isArray(v.parts)) return false;
+  if (typeof v.film_count !== 'number') return false;
+  if (typeof v.name !== 'string') return false;
+  // minimal validation passed
+  return true;
+};
+
+/**
+ * Calculate the average rating for a list of movies.
+ *
+ * Exported as a pure function for unit testing.
+ *
+ * @param movies - array of Movie objects
+ * @returns average rating (0 if empty)
+ */
+export const calculateAverageRating = (movies: Movie[]): number => {
+  if (!movies || movies.length === 0) return 0;
+  const total = movies.reduce((sum, movie) => sum + (typeof movie.vote_average === 'number' ? movie.vote_average : 0), 0);
+  return total / movies.length;
+};
+
+/**
+ * Sort movies based on a SortOption.
+ *
+ * Exported as a pure function for unit testing.
+ *
+ * @param movies - array of Movie objects
+ * @param sortBy - sort option
+ * @returns a new sorted array of movies
+ */
+export const sortMovies = (movies: Movie[], sortBy: SortOption): Movie[] => {
+  const copy = [...movies];
+  switch (sortBy) {
+    case 'chronological': {
+      const getTime = (s?: string) => (s ? new Date(s).getTime() : 0);
+      return copy.sort((a, b) => getTime(a.release_date) - getTime(b.release_date));
+    }
+    case 'rating':
+      return copy.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
+    case 'title':
+      return copy.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    case 'release':
+    default:
+      return copy;
+  }
+};
+
+/**
+ * Filter movies by a search query and optionally slice for preview.
+ *
+ * Exported as a pure function for unit testing.
+ *
+ * @param movies - sorted array of movies
+ * @param query - search query string
+ * @param previewLimit - if provided, slice results to this length
+ * @returns filtered array of movies
+ */
+export const filterMovies = (movies: Movie[], query: string, previewLimit?: number): Movie[] => {
+  let result = movies;
+  const q = (query || '').trim().toLowerCase();
+  if (q) {
+    result = result.filter(movie => {
+      const title = (movie.title || '').toLowerCase();
+      const overview = (movie.overview || '').toLowerCase();
+      return title.includes(q) || overview.includes(q);
+    });
+  }
+  if (typeof previewLimit === 'number') {
+    return result.slice(0, previewLimit);
+  }
+  return result;
+};
+
+/**
+ * Format runtime minutes into "Xh Ym" or "Zm" representation.
+ *
+ * Exported for testing.
+ *
+ * @param minutes - runtime in minutes
+ * @returns formatted runtime string
+ */
+export const formatRuntime = (minutes: number): string => {
+  if (!minutes || typeof minutes !== 'number' || minutes <= 0) return '0m';
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours === 0) return `${remainingMinutes}m`;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+/**
+ * Compute the progress percentage for a collection based on user progress.
+ *
+ * Exported for reuse and unit testing.
+ *
+ * @param collection - optional collection object
+ * @returns progress percentage 0-100
+ */
+export const computeProgress = (collection?: CollectionDetails | null): number => {
+  if (!collection) return 0;
+  const watchedLen = Array.isArray(collection.user_progress?.watched_films) ? collection.user_progress!.watched_films.length : 0;
+  const total = collection.film_count || (Array.isArray(collection.parts) ? collection.parts.length : 0);
+  if (total === 0) return 0;
+  return (watchedLen / total) * 100;
+};
+
+/**
+ * Compute the watched count for a collection.
+ *
+ * @param collection - optional collection object
+ * @returns number of watched films
+ */
+export const computeWatchedCount = (collection?: CollectionDetails | null): number => {
+  if (!collection) return 0;
+  return Array.isArray(collection.user_progress?.watched_films) ? collection.user_progress!.watched_films.length : 0;
+};
+
+/**
+ * Determine whether a movie is marked as watched in the collection.
+ *
+ * @param collection - optional collection object
+ * @param movieId - movie id to check
+ * @returns true if watched, false otherwise
+ */
+export const isMovieWatchedInCollection = (collection: CollectionDetails | null | undefined, movieId: number): boolean => {
+  if (!collection) return false;
+  return !!collection.user_progress?.watched_films?.includes(movieId);
+};
+
+/**
+ * Get sorted movies from a collection using an existing sort option.
+ *
+ * @param collection - optional collection object
+ * @param sortBy - sort option
+ * @returns sorted array of movies
+ */
+export const getSortedCollectionMovies = (collection: CollectionDetails | null | undefined, sortBy: SortOption): Movie[] => {
+  if (!collection) return [];
+  return sortMovies(collection.parts, sortBy);
+};
+
+/**
+ * Get filtered (and optionally preview-limited) movies from a collection.
+ *
+ * @param collection - optional collection object
+ * @param sortBy - sort option
+ * @param query - search query
+ * @param showAll - if true, return all results, otherwise preview limit applied
+ * @returns filtered array of movies
+ */
+export const getFilteredCollectionMovies = (collection: CollectionDetails | null | undefined, sortBy: SortOption, query: string, showAll: boolean): Movie[] => {
+  const movies = getSortedCollectionMovies(collection, sortBy);
+  const previewLimit = showAll ? undefined : 6;
+  return filterMovies(movies, query, previewLimit);
+};
+
+/**
+ * CollectionDetailPage
+ *
+ * Displays detailed information about a collection.
+ *
+ * Props: optional initialCollection and optional loader for dependency injection/testing.
+ */
+const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialCollection, loader }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
   // State management
-  const [collection, setCollection] = useState<CollectionDetails | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [collection, setCollection] = useState<CollectionDetails | null>(() => (isValidCollection(initialCollection) ? initialCollection as CollectionDetails : null));
+  const [loading, setLoading] = useState<boolean>(() => (isValidCollection(initialCollection) ? false : true));
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -55,43 +244,64 @@ const CollectionDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (id) {
-      fetchCollectionDetails(parseInt(id));
+      fetchCollectionDetails(parseInt(id, 10));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const fetchCollectionDetails = async (collectionId: number) => {
+  /**
+   * Fetch collection details from the API and validate response.
+   *
+   * @param collectionId - numeric collection id to fetch
+   */
+  const fetchCollectionDetails = async (collectionId: number): Promise<void> => {
     try {
       setLoading(true);
       setError(null);
       
-      const details = await getCollectionDetails(collectionId);
-      if (details) {
-        // Enhance with user progress
-        const enhancedDetails = CollectionsService.enhanceCollectionsWithProgress([details])[0];
-        setCollection(enhancedDetails);
-      } else {
-        setError('Collection not found');
+      const details = await (loader ? loader(collectionId) : getCollectionDetails(collectionId));
+      if (!isValidCollection(details)) {
+        setError('Collection not found or invalid data received');
+        setCollection(null);
+        return;
       }
-    } catch (err) {
+
+      // Enhance with user progress
+      const enhancedDetails = CollectionsService.enhanceCollectionsWithProgress([details])[0];
+      setCollection(enhancedDetails);
+    } catch (err: any) {
       console.error('Error fetching collection details:', err);
-      setError('Failed to load collection details');
+      setError(err?.message || 'Failed to load collection details');
+      setCollection(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStartWatching = () => {
+  /**
+   * Handler to start watching the collection.
+   *
+   * Public action wired to UI; keeps external signature intact.
+   */
+  const handleStartWatching = (): void => {
     if (!collection || !collection.parts.length) return;
     
     // Start marathon session
-    CollectionsService.startMarathonSession(collection, viewingOrder);
+    CollectionsService.startMarathonSession(collection, viewingOrder as ViewingOrder);
     
-    // Navigate to first movie
+    // Navigate to first movie (preserve current ordering)
     const firstMovie = collection.parts[0];
-    navigate(`/movie/${firstMovie.id}`);
+    if (firstMovie?.id) {
+      navigate(`/movie/${firstMovie.id}`);
+    }
   };
 
-  const handleAddAllToList = () => {
+  /**
+   * Handler to add all collection movies to user's list.
+   *
+   * Public action wired to UI.
+   */
+  const handleAddAllToList = (): void => {
     if (!collection) return;
     
     collection.parts.forEach(movie => {
@@ -101,61 +311,15 @@ const CollectionDetailPage: React.FC = () => {
     });
   };
 
-  const formatRuntime = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    if (hours === 0) return `${remainingMinutes}m`;
-    return `${hours}h ${remainingMinutes}m`;
-  };
-
-  const getProgress = (): number => {
-    if (!collection?.user_progress) return 0;
-    return (collection.user_progress.watched_films.length / collection.film_count) * 100;
-  };
-
-  const getWatchedCount = (): number => {
-    return collection?.user_progress?.watched_films.length || 0;
-  };
-
-  const getSortedMovies = (): Movie[] => {
-    if (!collection) return [];
-    
-    let movies = [...collection.parts];
-    
-    switch (sortBy) {
-      case 'chronological':
-        return movies.sort((a, b) => new Date(a.release_date).getTime() - new Date(b.release_date).getTime());
-      case 'rating':
-        return movies.sort((a, b) => b.vote_average - a.vote_average);
-      case 'title':
-        return movies.sort((a, b) => a.title.localeCompare(b.title));
-      case 'release':
-      default:
-        return movies;
-    }
-  };
-
-  const getFilteredMovies = (): Movie[] => {
-    let movies = getSortedMovies();
-    
-    if (searchQuery) {
-      movies = movies.filter(movie => 
-        movie.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        movie.overview.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-    
-    return showAllMovies ? movies : movies.slice(0, 6);
-  };
-
-  const isMovieWatched = (movieId: number): boolean => {
-    return collection?.user_progress?.watched_films.includes(movieId) || false;
-  };
-
-  const toggleMovieWatched = (movieId: number) => {
+  /**
+   * Toggle watched state for a movie within this collection.
+   *
+   * @param movieId - id of the movie to toggle
+   */
+  const toggleMovieWatched = (movieId: number): void => {
     if (!collection) return;
     
-    if (isMovieWatched(movieId)) {
+    if (isMovieWatchedInCollection(collection, movieId)) {
       CollectionsService.markFilmUnwatched(collection.id, movieId);
     } else {
       CollectionsService.markFilmWatched(collection.id, movieId);
@@ -186,8 +350,11 @@ const CollectionDetailPage: React.FC = () => {
     );
   }
 
-  const progress = getProgress();
-  const watchedCount = getWatchedCount();
+  const progress = computeProgress(collection);
+  const watchedCount = computeWatchedCount(collection);
+  const averageRating = calculateAverageRating(collection.parts).toFixed(1);
+  const safeBackdrop = getBackdropUrl(collection.backdrop_path || '', 'w1280');
+  const safePoster = getPosterUrl(collection.poster_path || '', 'w500');
 
   return (
     <div className="min-h-screen bg-netflix-black">
@@ -196,8 +363,8 @@ const CollectionDetailPage: React.FC = () => {
         {/* Background Image */}
         <div className="absolute inset-0">
           <img
-            src={getBackdropUrl(collection.backdrop_path, 'w1280')}
-            alt={collection.name}
+            src={safeBackdrop}
+            alt={collection.name || 'Collection backdrop'}
             className="w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-netflix-black via-netflix-black/80 to-netflix-black/40"></div>
@@ -223,8 +390,8 @@ const CollectionDetailPage: React.FC = () => {
               <div className="lg:col-span-1">
                 <div className="relative max-w-sm mx-auto lg:mx-0">
                   <img
-                    src={getPosterUrl(collection.poster_path, 'w500')}
-                    alt={collection.name}
+                    src={safePoster}
+                    alt={collection.name || 'Collection poster'}
                     className="w-full rounded-lg shadow-2xl"
                   />
                   {/* Progress Ring Overlay */}
@@ -249,14 +416,14 @@ const CollectionDetailPage: React.FC = () => {
                       {collection.film_count} {collection.film_count === 1 ? 'Movie' : 'Movies'}
                     </span>
                     <span className="bg-gray-700 text-white px-3 py-1 rounded-full text-sm">
-                      {collection.type.replace('_', ' ').toUpperCase()}
+                      {String(collection.type || '').replace('_', ' ').toUpperCase()}
                     </span>
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                       collection.status === 'complete' ? 'bg-green-600 text-white' :
                       collection.status === 'ongoing' ? 'bg-blue-600 text-white' :
                       'bg-yellow-600 text-black'
                     }`}>
-                      {collection.status.toUpperCase()}
+                      {(collection.status || '').toUpperCase()}
                     </span>
                   </div>
                 </div>
@@ -265,17 +432,17 @@ const CollectionDetailPage: React.FC = () => {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                   <div className="bg-black/50 backdrop-blur-sm rounded-lg p-4">
                     <Star className="w-6 h-6 text-yellow-400 mx-auto mb-2" />
-                    <div className="text-2xl font-bold text-white">{(collection.parts.reduce((sum, movie) => sum + movie.vote_average, 0) / collection.parts.length).toFixed(1)}</div>
+                    <div className="text-2xl font-bold text-white">{averageRating}</div>
                     <div className="text-gray-300 text-sm">Avg Rating</div>
                   </div>
                   <div className="bg-black/50 backdrop-blur-sm rounded-lg p-4">
                     <Clock className="w-6 h-6 text-blue-400 mx-auto mb-2" />
-                    <div className="text-2xl font-bold text-white">{formatRuntime(collection.total_runtime)}</div>
+                    <div className="text-2xl font-bold text-white">{formatRuntime(collection.total_runtime || 0)}</div>
                     <div className="text-gray-300 text-sm">Total Runtime</div>
                   </div>
                   <div className="bg-black/50 backdrop-blur-sm rounded-lg p-4">
                     <Calendar className="w-6 h-6 text-green-400 mx-auto mb-2" />
-                    <div className="text-2xl font-bold text-white">{new Date(collection.first_release_date).getFullYear()}</div>
+                    <div className="text-2xl font-bold text-white">{collection.first_release_date ? new Date(collection.first_release_date).getFullYear() : 'N/A'}</div>
                     <div className="text-gray-300 text-sm">First Release</div>
                   </div>
                   <div className="bg-black/50 backdrop-blur-sm rounded-lg p-4">
@@ -432,7 +599,7 @@ const CollectionDetailPage: React.FC = () => {
 
                 {/* Movies Grid/List */}
                 <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6' : 'space-y-4'}`}>
-                  {getFilteredMovies().map((movie, index) => (
+                  {getFilteredCollectionMovies(collection, sortBy, searchQuery, showAllMovies).map((movie, index) => (
                     <div key={movie.id} className={`relative group ${viewMode === 'list' ? 'flex space-x-4 bg-gray-800/50 rounded-lg p-4' : ''}`}>
                       {viewMode === 'grid' ? (
                         /* Grid View */
@@ -447,7 +614,7 @@ const CollectionDetailPage: React.FC = () => {
                               
                               {/* Watch Status Indicator */}
                               <div className={`absolute top-3 left-3 w-3 h-3 rounded-full ${
-                                isMovieWatched(movie.id) ? 'bg-green-500' : 'bg-gray-500'
+                                isMovieWatchedInCollection(collection, movie.id) ? 'bg-green-500' : 'bg-gray-500'
                               }`}></div>
                               
                               {/* Movie Number */}
@@ -490,21 +657,21 @@ const CollectionDetailPage: React.FC = () => {
                           <div className="mt-3">
                             <h3 className="text-white font-semibold truncate">{movie.title}</h3>
                             <div className="flex items-center justify-between text-sm text-gray-400 mt-1">
-                              <span>{new Date(movie.release_date).getFullYear()}</span>
+                              <span>{movie.release_date ? new Date(movie.release_date).getFullYear() : 'N/A'}</span>
                               <div className="flex items-center">
                                 <Star className="w-4 h-4 text-yellow-400 mr-1" />
-                                <span>{movie.vote_average.toFixed(1)}</span>
+                                <span>{(movie.vote_average || 0).toFixed(1)}</span>
                               </div>
                             </div>
                             <button
                               onClick={() => toggleMovieWatched(movie.id)}
                               className={`mt-2 w-full py-2 rounded text-sm font-medium transition-colors ${
-                                isMovieWatched(movie.id)
+                                isMovieWatchedInCollection(collection, movie.id)
                                   ? 'bg-green-600 text-white hover:bg-green-700'
                                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                               }`}
                             >
-                              {isMovieWatched(movie.id) ? 'Watched' : 'Mark as Watched'}
+                              {isMovieWatchedInCollection(collection, movie.id) ? 'Watched' : 'Mark as Watched'}
                             </button>
                           </div>
                         </div>
@@ -523,10 +690,10 @@ const CollectionDetailPage: React.FC = () => {
                               <div>
                                 <h3 className="text-white font-semibold text-lg">{movie.title}</h3>
                                 <div className="flex items-center space-x-4 text-sm text-gray-400 mt-1">
-                                  <span>{new Date(movie.release_date).getFullYear()}</span>
+                                  <span>{movie.release_date ? new Date(movie.release_date).getFullYear() : 'N/A'}</span>
                                   <div className="flex items-center">
                                     <Star className="w-4 h-4 text-yellow-400 mr-1" />
-                                    <span>{movie.vote_average.toFixed(1)}</span>
+                                    <span>{(movie.vote_average || 0).toFixed(1)}</span>
                                   </div>
                                   <span>{movie.runtime ? formatRuntime(movie.runtime) : 'N/A'}</span>
                                 </div>
@@ -536,12 +703,12 @@ const CollectionDetailPage: React.FC = () => {
                                 <button
                                   onClick={() => toggleMovieWatched(movie.id)}
                                   className={`px-3 py-1 rounded text-xs font-medium ${
-                                    isMovieWatched(movie.id)
+                                    isMovieWatchedInCollection(collection, movie.id)
                                       ? 'bg-green-600 text-white'
                                       : 'bg-gray-700 text-gray-300'
                                   }`}
                                 >
-                                  {isMovieWatched(movie.id) ? 'Watched' : 'Unwatched'}
+                                  {isMovieWatchedInCollection(collection, movie.id) ? 'Watched' : 'Unwatched'}
                                 </button>
                                 <button className="text-gray-400 hover:text-white">
                                   <MoreHorizontal className="w-5 h-5" />
@@ -638,11 +805,11 @@ const CollectionDetailPage: React.FC = () => {
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-400">Genres:</span>
-                      <span className="text-white">{collection.genre_categories.join(', ')}</span>
+                      <span className="text-white">{(collection.genre_categories || []).join(', ')}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Studio:</span>
-                      <span className="text-white">{collection.studio}</span>
+                      <span className="text-white">{collection.studio || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Status:</span>
@@ -651,13 +818,13 @@ const CollectionDetailPage: React.FC = () => {
                         collection.status === 'ongoing' ? 'text-blue-400' :
                         'text-yellow-400'
                       }`}>
-                        {collection.status}
+                        {collection.status || 'unknown'}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Span:</span>
                       <span className="text-white">
-                        {new Date(collection.first_release_date).getFullYear()} - {new Date(collection.latest_release_date).getFullYear()}
+                        {collection.first_release_date ? new Date(collection.first_release_date).getFullYear() : 'N/A'} - {collection.latest_release_date ? new Date(collection.latest_release_date).getFullYear() : 'N/A'}
                       </span>
                     </div>
                   </div>

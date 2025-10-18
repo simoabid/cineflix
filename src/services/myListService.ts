@@ -1,26 +1,238 @@
 import { MyListItem, CustomCollection, ListStats, FilterOptions, ListPreferences, BulkOperation } from '../types/myList';
 import { Movie, TVShow } from '../types';
 
+/**
+ * Lightweight storage abstraction to allow injection and testing.
+ */
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
+}
+
+/**
+ * Minimal logger interface for contextual logging injection.
+ */
+export interface LoggerLike {
+  info(...args: any[]): void;
+  warn(...args: any[]): void;
+  error(...args: any[]): void;
+  debug?(...args: any[]): void;
+}
+
+/**
+ * Error thrown when input validation fails.
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+/**
+ * Error thrown when storage operations fail.
+ */
+export class StorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StorageError';
+  }
+}
+
+/**
+ * Pure helper: safely parse a JSON string and return a default on failure.
+ * Exported for unit testing.
+ */
+export function parseStoredJSON<T>(raw: string | null, fallback: T): T {
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Pure helper: calculate runtime for movies or TV shows.
+ * Exported for unit testing.
+ */
+export function calculateRuntimePure(content: Movie | TVShow, contentType: 'movie' | 'tv'): number {
+  if (contentType === 'movie') {
+    return (content as Movie).runtime || 120; // Default 2 hours
+  } else {
+    const tvShow = content as TVShow;
+    const episodeRuntime = (tvShow.episode_run_time && tvShow.episode_run_time[0]) || 45; // Default 45 min per episode
+    const episodes = tvShow.number_of_episodes || 20; // Default 20 episodes
+    return episodeRuntime * episodes;
+  }
+}
+
+/**
+ * Main service for managing the user's list.
+ * Constructor accepts optional storage and logger implementations for testability.
+ */
 class MyListService {
   private storageKey = 'cineflix_my_list';
   private collectionsKey = 'cineflix_collections';
   private preferencesKey = 'cineflix_list_preferences';
 
-  // Get all list items
-  getMyList(): MyListItem[] {
-    const stored = localStorage.getItem(this.storageKey);
-    return stored ? JSON.parse(stored) : [];
+  constructor(private storage: StorageLike = localStorage, private logger: LoggerLike = console) {}
+
+  // ----------------------
+  // Internal helpers
+  // ----------------------
+
+  private safeGetItem<T>(key: string, fallback: T): T {
+    try {
+      const raw = this.storage.getItem(key);
+      return parseStoredJSON<T>(raw, fallback);
+    } catch (err) {
+      this.logger.error('Storage read failed for key:', key, err);
+      return fallback;
+    }
   }
 
-  // Add item to list
-  addToList(content: Movie | TVShow, contentType: 'movie' | 'tv'): MyListItem {
-    const items = this.getMyList();
-    const existingItem = items.find(item => 
-      item.contentId === content.id && item.contentType === contentType
-    );
+  private safeSetItem(key: string, value: any): void {
+    try {
+      this.storage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+      this.logger.error('Storage write failed for key:', key, err);
+      throw new StorageError(`Failed to save data for key ${key}`);
+    }
+  }
 
-    if (existingItem) {
-      return existingItem;
+  private validateContentType(contentType: any): asserts contentType is 'movie' | 'tv' {
+    if (contentType !== 'movie' && contentType !== 'tv') {
+      throw new ValidationError('contentType must be "movie" or "tv"');
+    }
+  }
+
+  private validateId(id: any): asserts id is string {
+    if (typeof id !== 'string' || id.trim() === '') {
+      throw new ValidationError('id must be a non-empty string');
+    }
+  }
+
+  private findItemIndex(items: MyListItem[], predicate: (item: MyListItem) => boolean): number {
+    return items.findIndex(predicate);
+  }
+
+  // ----------------------
+  // Public API methods
+  // ----------------------
+
+  /**
+   * Get all list items.
+   * @returns Array of MyListItem
+   */
+  getMyList(): MyListItem[] {
+    return this.safeGetItem<MyListItem[]>(this.storageKey, []);
+  }
+
+  /**
+   * Add an item to the list if it doesn't already exist.
+   * @param content Movie or TV show object
+   * @param contentType 'movie' | 'tv'
+   * @returns The created or existing MyListItem
+   */
+  addToList(content: Movie | TVShow, contentType: 'movie' | 'tv'): MyListItem {
+    this.validateContentType(contentType);
+    if (!content || (content as any).id == null) {
+      throw new ValidationError('content must be provided and contain an id');
+    }
+
+    const items = this.getMyList();
+    const existingItem = items.find(item => item.contentId === (content as any).id && item.contentType === contentType);
+
+    if (existingItem) return existingItem;
+
+    const newItem: MyListItem = {
+      id: `${(content as any).id}-${contentType}-${Date.now()}`,
+      contentId: (content as any).id,
+      contentType,
+      content,
+      dateAdded: new Date().toISOString(),
+      status: 'notStarted',
+      progress: 0,
+      priority: 'medium',
+      customTags: [],
+      estimatedRuntime: calculateRuntimePure(content, contentType),
+      isInContinueWatching: false,
+      isLiked: false
+    };
+
+    items.push(newItem);
+    this.saveList(items);
+    return newItem;
+  }
+
+  /**
+   * Remove an item from the list by its internal id.
+   * @param itemId string id of the list item
+   */
+  removeFromList(itemId: string): void {
+    this.validateId(itemId);
+    const items = this.getMyList().filter(item => item.id !== itemId);
+    this.saveList(items);
+  }
+
+  /**
+   * Toggle the liked state for content in the list.
+   * @param contentId numeric id of the content
+   * @param contentType 'movie' | 'tv'
+   * @returns the new liked state (true/false)
+   */
+  toggleLike(contentId: number, contentType: 'movie' | 'tv'): boolean {
+    if (typeof contentId !== 'number') throw new ValidationError('contentId must be a number');
+    this.validateContentType(contentType);
+
+    const items = this.getMyList();
+    const index = this.findItemIndex(items, item => item.contentId === contentId && item.contentType === contentType);
+    if (index === -1) return false;
+
+    items[index].isLiked = !items[index].isLiked;
+    items[index].likedAt = items[index].isLiked ? new Date().toISOString() : undefined;
+    this.saveList(items);
+    return items[index].isLiked;
+  }
+
+  /**
+   * Check whether a piece of content is liked.
+   * @param contentId number
+   * @param contentType 'movie' | 'tv'
+   */
+  isLiked(contentId: number, contentType: 'movie' | 'tv'): boolean {
+    if (typeof contentId !== 'number') throw new ValidationError('contentId must be a number');
+    this.validateContentType(contentType);
+    const item = this.getMyList().find(i => i.contentId === contentId && i.contentType === contentType);
+    return Boolean(item?.isLiked);
+  }
+
+  /**
+   * Get all items that are liked.
+   */
+  getLikedContent(): MyListItem[] {
+    return this.getMyList().filter(item => item.isLiked);
+  }
+
+  /**
+   * Like content; ensures the content is present in the list.
+   * @param content any movie/tv object with an id
+   * @param contentType 'movie' | 'tv'
+   */
+  likeContent(content: any, contentType: 'movie' | 'tv'): MyListItem {
+    this.validateContentType(contentType);
+    if (!content || content.id == null) throw new ValidationError('content must be provided and contain an id');
+
+    const items = this.getMyList();
+    const index = this.findItemIndex(items, item => item.contentId === content.id && item.contentType === contentType);
+
+    if (index !== -1) {
+      items[index].isLiked = true;
+      items[index].likedAt = new Date().toISOString();
+      this.saveList(items);
+      return items[index];
     }
 
     const newItem: MyListItem = {
@@ -33,9 +245,10 @@ class MyListService {
       progress: 0,
       priority: 'medium',
       customTags: [],
-      estimatedRuntime: this.calculateRuntime(content, contentType),
+      estimatedRuntime: calculateRuntimePure(content, contentType),
       isInContinueWatching: false,
-      isLiked: false
+      isLiked: true,
+      likedAt: new Date().toISOString()
     };
 
     items.push(newItem);
@@ -43,124 +256,69 @@ class MyListService {
     return newItem;
   }
 
-  // Remove item from list
-  removeFromList(itemId: string): void {
-    const items = this.getMyList().filter(item => item.id !== itemId);
+  /**
+   * Unlike content (if present in list).
+   * @param contentId number
+   * @param contentType 'movie' | 'tv'
+   */
+  unlikeContent(contentId: number, contentType: 'movie' | 'tv'): void {
+    if (typeof contentId !== 'number') throw new ValidationError('contentId must be a number');
+    this.validateContentType(contentType);
+
+    const items = this.getMyList();
+    const index = this.findItemIndex(items, item => item.contentId === contentId && item.contentType === contentType);
+    if (index === -1) return;
+
+    items[index].isLiked = false;
+    items[index].likedAt = undefined;
     this.saveList(items);
   }
 
-  // Like/Unlike content methods
-  toggleLike(contentId: number, contentType: 'movie' | 'tv'): boolean {
-    const items = this.getMyList();
-    const existingItem = items.find(item => 
-      item.contentId === contentId && item.contentType === contentType
-    );
-
-    if (existingItem) {
-      // Toggle like status for existing item
-      existingItem.isLiked = !existingItem.isLiked;
-      existingItem.likedAt = existingItem.isLiked ? new Date().toISOString() : undefined;
-      this.saveList(items);
-      return existingItem.isLiked;
-    }
-
-    return false;
-  }
-
-  // Check if content is liked
-  isLiked(contentId: number, contentType: 'movie' | 'tv'): boolean {
-    const items = this.getMyList();
-    const item = items.find(item => 
-      item.contentId === contentId && item.contentType === contentType
-    );
-    return item?.isLiked || false;
-  }
-
-  // Get all liked content
-  getLikedContent(): MyListItem[] {
-    return this.getMyList().filter(item => item.isLiked);
-  }
-
-  // Like content (add to list if not exists and mark as liked)
-  likeContent(content: any, contentType: 'movie' | 'tv'): MyListItem {
-    const items = this.getMyList();
-    const existingItem = items.find(item => 
-      item.contentId === content.id && item.contentType === contentType
-    );
-
-    if (existingItem) {
-      // Update existing item
-      existingItem.isLiked = true;
-      existingItem.likedAt = new Date().toISOString();
-      this.saveList(items);
-      return existingItem;
-    } else {
-      // Create new item and mark as liked
-      const newItem: MyListItem = {
-        id: `${content.id}-${contentType}-${Date.now()}`,
-        contentId: content.id,
-        contentType,
-        content,
-        dateAdded: new Date().toISOString(),
-        status: 'notStarted',
-        progress: 0,
-        priority: 'medium',
-        customTags: [],
-        estimatedRuntime: this.calculateRuntime(content, contentType),
-        isInContinueWatching: false,
-        isLiked: true,
-        likedAt: new Date().toISOString()
-      };
-
-      items.push(newItem);
-      this.saveList(items);
-      return newItem;
-    }
-  }
-
-  // Unlike content
-  unlikeContent(contentId: number, contentType: 'movie' | 'tv'): void {
-    const items = this.getMyList();
-    const item = items.find(item => 
-      item.contentId === contentId && item.contentType === contentType
-    );
-
-    if (item) {
-      item.isLiked = false;
-      item.likedAt = undefined;
-      this.saveList(items);
-    }
-  }
-
-  // Update item
+  /**
+   * Update an existing item by id with provided partial updates.
+   * @param itemId string id of the item
+   * @param updates partial item fields to update
+   */
   updateItem(itemId: string, updates: Partial<MyListItem>): void {
+    this.validateId(itemId);
+    if (!updates || typeof updates !== 'object') throw new ValidationError('updates must be an object');
+
     const items = this.getMyList();
-    const index = items.findIndex(item => item.id === itemId);
-    
-    if (index !== -1) {
-      items[index] = { ...items[index], ...updates };
-      this.saveList(items);
-    }
+    const index = this.findItemIndex(items, item => item.id === itemId);
+    if (index === -1) return;
+
+    items[index] = { ...items[index], ...updates };
+    this.saveList(items);
   }
 
-  // Check if item is in list
+  /**
+   * Check whether a content entry exists in the list.
+   * @param contentId number
+   * @param contentType 'movie' | 'tv'
+   */
   isInList(contentId: number, contentType: 'movie' | 'tv'): boolean {
-    const items = this.getMyList();
-    return items.some(item => 
-      item.contentId === contentId && item.contentType === contentType
-    );
+    if (typeof contentId !== 'number') throw new ValidationError('contentId must be a number');
+    this.validateContentType(contentType);
+    return this.getMyList().some(item => item.contentId === contentId && item.contentType === contentType);
   }
 
-  // Get filtered and sorted items
+  /**
+   * Get filtered and sorted items according to provided options.
+   * @param filters FilterOptions
+   * @param sortBy string
+   * @param sortDirection 'asc' | 'desc'
+   */
   getFilteredItems(filters: FilterOptions, sortBy: string, sortDirection: 'asc' | 'desc'): MyListItem[] {
-    let items = this.getMyList();
+    if (!filters || typeof filters !== 'object') throw new ValidationError('filters must be provided');
+    const itemsCopy = [...this.getMyList()];
+    let items = itemsCopy;
 
     // Apply filters
     if (filters.contentType !== 'all') {
       items = items.filter(item => {
         if (filters.contentType === 'documentary') {
-          return item.content.genre_ids?.includes(99) || 
-                 item.content.genres?.some(g => g.name.toLowerCase().includes('documentary'));
+          return item.content.genre_ids?.includes(99) ||
+                 item.content.genres?.some(g => (g.name || '').toLowerCase().includes('documentary'));
         }
         return item.contentType === filters.contentType;
       });
@@ -170,40 +328,33 @@ class MyListService {
       items = items.filter(item => item.status === filters.status);
     }
 
-    if (filters.genres.length > 0) {
-      items = items.filter(item => 
+    if (filters.genres && filters.genres.length > 0) {
+      items = items.filter(item =>
         item.content.genre_ids?.some(id => filters.genres.includes(id)) ||
-        item.content.genres?.some(g => filters.genres.includes(g.id))
+        item.content.genres?.some((g: any) => filters.genres.includes(g.id))
       );
     }
 
-    if (filters.customTags.length > 0) {
-      items = items.filter(item => 
-        filters.customTags.some(tag => item.customTags.includes(tag))
-      );
+    if (filters.customTags && filters.customTags.length > 0) {
+      items = items.filter(item => filters.customTags.some(tag => item.customTags.includes(tag)));
     }
 
-    if (filters.priority !== 'all') {
+    if (filters.priority && filters.priority !== 'all') {
       items = items.filter(item => item.priority === filters.priority);
     }
 
-    // Apply liked filter
-    if (filters.liked !== 'all') {
+    if (filters.liked && filters.liked !== 'all') {
       items = items.filter(item => {
-        if (filters.liked === 'liked') {
-          return item.isLiked === true;
-        } else if (filters.liked === 'notLiked') {
-          return item.isLiked === false;
-        }
+        if (filters.liked === 'liked') return item.isLiked === true;
+        if (filters.liked === 'notLiked') return item.isLiked === false;
         return true;
       });
     }
 
-    // Apply date filters
-    if (filters.dateAdded !== 'all') {
+    // Date filters
+    if (filters.dateAdded && filters.dateAdded !== 'all') {
       const now = new Date();
       const filterDate = new Date();
-      
       switch (filters.dateAdded) {
         case 'lastWeek':
           filterDate.setDate(now.getDate() - 7);
@@ -215,12 +366,11 @@ class MyListService {
           filterDate.setFullYear(now.getFullYear() - 1);
           break;
       }
-      
       items = items.filter(item => new Date(item.dateAdded) >= filterDate);
     }
 
-    // Apply runtime filters
-    if (filters.runtime !== 'all') {
+    // Runtime filters
+    if (filters.runtime && filters.runtime !== 'all') {
       items = items.filter(item => {
         const runtime = item.estimatedRuntime;
         switch (filters.runtime) {
@@ -236,9 +386,10 @@ class MyListService {
       });
     }
 
-    // Apply sorting
+    // Sorting
     items.sort((a, b) => {
-      let aValue: any, bValue: any;
+      let aValue: any;
+      let bValue: any;
 
       switch (sortBy) {
         case 'dateAdded':
@@ -250,8 +401,8 @@ class MyListService {
           bValue = (b.content as any).title || (b.content as any).name || '';
           break;
         case 'rating':
-          aValue = a.content.vote_average;
-          bValue = b.content.vote_average;
+          aValue = a.content.vote_average ?? 0;
+          bValue = b.content.vote_average ?? 0;
           break;
         case 'runtime':
           aValue = a.estimatedRuntime;
@@ -273,15 +424,21 @@ class MyListService {
     return items;
   }
 
-  // Search items
+  /**
+   * Search items by query, optionally including notes and tags.
+   * @param query string to search
+   * @param includeNotes boolean
+   * @param includeTags boolean
+   */
   searchItems(query: string, includeNotes: boolean = true, includeTags: boolean = true): MyListItem[] {
+    if (typeof query !== 'string') throw new ValidationError('query must be a string');
     const items = this.getMyList();
     const searchQuery = query.toLowerCase();
 
     return items.filter(item => {
       const title = ((item.content as any).title || (item.content as any).name || '').toLowerCase();
       const overview = (item.content.overview || '').toLowerCase();
-      
+
       let matches = title.includes(searchQuery) || overview.includes(searchQuery);
 
       if (includeNotes && item.personalNotes) {
@@ -296,31 +453,31 @@ class MyListService {
     });
   }
 
-  // Get list statistics
+  /**
+   * Compute list statistics.
+   */
   getListStats(): ListStats {
     const items = this.getMyList();
     const totalItems = items.length;
     const totalMovies = items.filter(item => item.contentType === 'movie').length;
     const totalTVShows = items.filter(item => item.contentType === 'tv').length;
-    const totalHours = Math.round(items.reduce((sum, item) => sum + item.estimatedRuntime, 0) / 60);
-    
+    const totalHours = Math.round(items.reduce((sum, item) => sum + (item.estimatedRuntime || 0), 0) / 60);
+
     const completedItems = items.filter(item => item.status === 'completed').length;
     const completionRate = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-    
-    const ratedItems = items.filter(item => item.personalRating);
-    const averageRating = ratedItems.length > 0 
-      ? ratedItems.reduce((sum, item) => sum + (item.personalRating || 0), 0) / ratedItems.length 
+
+    const ratedItems = items.filter(item => item.personalRating != null);
+    const averageRating = ratedItems.length > 0
+      ? ratedItems.reduce((sum, item) => sum + (item.personalRating || 0), 0) / ratedItems.length
       : 0;
 
-    // Genre distribution
     const genreDistribution: { [key: string]: number } = {};
     items.forEach(item => {
-      item.content.genres?.forEach(genre => {
+      item.content.genres?.forEach((genre: any) => {
         genreDistribution[genre.name] = (genreDistribution[genre.name] || 0) + 1;
       });
     });
 
-    // Status distribution
     const statusDistribution = {
       notStarted: items.filter(item => item.status === 'notStarted').length,
       inProgress: items.filter(item => item.status === 'inProgress').length,
@@ -328,7 +485,6 @@ class MyListService {
       dropped: items.filter(item => item.status === 'dropped').length
     };
 
-    // Monthly additions (last 12 months)
     const monthlyAdditions: { [key: string]: number } = {};
     const now = new Date();
     for (let i = 11; i >= 0; i--) {
@@ -357,10 +513,16 @@ class MyListService {
     };
   }
 
-  // Bulk operations
+  /**
+   * Perform bulk operations on multiple items.
+   * @param operation BulkOperation
+   */
   performBulkOperation(operation: BulkOperation): void {
+    if (!operation || !Array.isArray(operation.itemIds)) {
+      throw new ValidationError('operation must contain an itemIds array');
+    }
     const items = this.getMyList();
-    
+
     operation.itemIds.forEach(itemId => {
       const index = items.findIndex(item => item.id === itemId);
       if (index === -1) return;
@@ -381,25 +543,36 @@ class MyListService {
           items[index].priority = operation.payload;
           break;
         case 'addTags':
-          const newTags = operation.payload.filter((tag: string) => !items[index].customTags.includes(tag));
-          items[index].customTags.push(...newTags);
+          {
+            const newTags = (operation.payload || []).filter((tag: string) => !items[index].customTags.includes(tag));
+            items[index].customTags.push(...newTags);
+          }
           break;
         case 'removeTags':
-          items[index].customTags = items[index].customTags.filter(tag => !operation.payload.includes(tag));
+          items[index].customTags = items[index].customTags.filter(tag => !(operation.payload || []).includes(tag));
           break;
+        default:
+          this.logger.warn('Unknown bulk operation type:', (operation as any).type);
       }
     });
 
     this.saveList(items);
   }
 
-  // Custom Collections
+  /**
+   * Get all custom collections.
+   */
   getCollections(): CustomCollection[] {
-    const stored = localStorage.getItem(this.collectionsKey);
-    return stored ? JSON.parse(stored) : [];
+    return this.safeGetItem<CustomCollection[]>(this.collectionsKey, []);
   }
 
+  /**
+   * Create a new custom collection.
+   * @param name string
+   * @param description optional string
+   */
   createCollection(name: string, description?: string): CustomCollection {
+    if (!name || typeof name !== 'string') throw new ValidationError('name must be a non-empty string');
     const collections = this.getCollections();
     const newCollection: CustomCollection = {
       id: `collection_${Date.now()}`,
@@ -412,14 +585,15 @@ class MyListService {
     };
 
     collections.push(newCollection);
-    localStorage.setItem(this.collectionsKey, JSON.stringify(collections));
+    this.safeSetItem(this.collectionsKey, collections);
     return newCollection;
   }
 
-  // Preferences
+  /**
+   * Get list preferences (with reasonable defaults).
+   */
   getPreferences(): ListPreferences {
-    const stored = localStorage.getItem(this.preferencesKey);
-    return stored ? JSON.parse(stored) : {
+    return this.safeGetItem<ListPreferences>(this.preferencesKey, {
       defaultViewMode: 'grid',
       defaultSortOption: 'dateAdded',
       defaultSortDirection: 'desc',
@@ -428,30 +602,36 @@ class MyListService {
       showProgressBars: true,
       enableNotifications: true,
       compactModeItemsPerRow: 10
-    };
+    });
   }
 
+  /**
+   * Save list preferences.
+   * @param preferences ListPreferences
+   */
   savePreferences(preferences: ListPreferences): void {
-    localStorage.setItem(this.preferencesKey, JSON.stringify(preferences));
+    if (!preferences || typeof preferences !== 'object') throw new ValidationError('preferences must be an object');
+    this.safeSetItem(this.preferencesKey, preferences);
   }
 
-  // Helper methods
+  /**
+   * Persist the provided list of items.
+   * @param items MyListItem[]
+   */
   private saveList(items: MyListItem[]): void {
-    localStorage.setItem(this.storageKey, JSON.stringify(items));
+    this.safeSetItem(this.storageKey, items);
   }
 
+  /**
+   * Calculate runtime using pure helper (kept private to preserve API).
+   */
   private calculateRuntime(content: Movie | TVShow, contentType: 'movie' | 'tv'): number {
-    if (contentType === 'movie') {
-      return (content as Movie).runtime || 120; // Default 2 hours
-    } else {
-      const tvShow = content as TVShow;
-      const episodeRuntime = tvShow.episode_run_time?.[0] || 45; // Default 45 min per episode
-      const episodes = tvShow.number_of_episodes || 20; // Default 20 episodes
-      return episodeRuntime * episodes;
-    }
+    return calculateRuntimePure(content, contentType);
   }
 
-  // Continue watching items
+  /**
+   * Return items that are eligible for continue watching.
+   */
   getContinueWatching(): MyListItem[] {
     return this.getMyList()
       .filter(item => item.status === 'inProgress' && item.progress > 0 && item.progress < 100)
@@ -459,17 +639,23 @@ class MyListService {
       .slice(0, 10);
   }
 
-  // Recently added items
+  /**
+   * Get recently added items limited by `limit`.
+   * @param limit number (default 10)
+   */
   getRecentlyAdded(limit: number = 10): MyListItem[] {
+    if (typeof limit !== 'number' || limit <= 0) throw new ValidationError('limit must be a positive number');
     return this.getMyList()
       .sort((a, b) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime())
       .slice(0, limit);
   }
 
-  // Get all unique tags
+  /**
+   * Return all unique custom tags across the list.
+   */
   getAllTags(): string[] {
     const items = this.getMyList();
-    const allTags = items.flatMap(item => item.customTags);
+    const allTags = items.flatMap(item => item.customTags || []);
     return [...new Set(allTags)].sort();
   }
 }

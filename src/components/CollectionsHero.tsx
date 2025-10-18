@@ -4,6 +4,9 @@ import { getBackdropUrl, getPosterUrl } from '../services/tmdb';
 import CollectionsService from '../services/collectionsService';
 import { Play, Clock, Calendar, Film, Star, ChevronRight, Users } from 'lucide-react';
 
+/**
+ * Props for CollectionsHero component
+ */
 interface CollectionsHeroProps {
   collection: CollectionDetails;
   onStartMarathon: () => void;
@@ -11,63 +14,171 @@ interface CollectionsHeroProps {
   onHeroInteraction?: () => void;
 }
 
+/**
+ * Type helper for a single film item within a collection.
+ */
+type FilmItem = CollectionDetails['parts'][number];
+
+/**
+ * Placeholder SVG data URIs used as image fallbacks.
+ */
+const HERO_POSTER_PLACEHOLDER =
+  'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAwIiBoZWlnaHQ9Ijc1MCIgdmlld0JveD0iMCAwIDUwMCA3NTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MDAiIGhlaWdodD0iNzUwIiBmaWxsPSIjMTQxNDE0Ii8+CjxyZWN0IHg9IjIwIiB5PSIyMCIgd2lkdGg9IjQ2MCIgaGVpZ2h0PSI3MTAiIHJ4PSIxMiIgZmlsbD0iIzJBMkEyQSIgc3Ryb2tlPSIjMzc0MTUxIiBzdHJva2Utd2lkdGg9IjIiLz4KPHN2ZyB4PSIyMjAiIHk9IjMzNSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTQgMlYyMEwxOSAxNVYxMUwxNCA2VjJaIiBmaWxsPSIjRTUwOTE0Ii8+CjxwYXRoIGQ9Ik0xMyAySDVDMy45IDIgMyAyLjkgMyA0VjIwQzMgMjEuMSAzLjkgMjIgNSAyMkgxM1YyWiIgZmlsbD0iI0U1MDkxNCIvPgo8L3N2Zz4KPHRleHQgeD0iMjUwIiB5PSI0MzAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iIzlDQTNBRiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q2luZUZsaXggQ29sbGVjdGlvbjwvdGV4dD4KPC9zdmc+';
+const SMALL_POSTER_PLACEHOLDER =
+  'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiB2aWV3Qm94PSIwIDAgOTIgMTM4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cmVjdCB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiBmaWxsPSIjMTQxNDE0Ii8+CjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI4NiIgaGVpZ2h0PSIxMzIiIHJ4PSI0IiBmaWxsPSIjMkEyQTJBIiBzdHJva2U9IiMzNzQxNTEiIHN0cm9rZS13aWR0aD0iMSIvPgo8c3ZnIHg9IjM2IiB5PSI1OSIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTQgMlYyMEwxOSAxNVYxMUwxNCA2VjJaIiBmaWxsPSIjRTUwOTE0Ii8+CjxwYXRoIGQ9Ik0xMyAySDVDMy45IDIgMyAyLjkgMyA0VjIwQzMgMjEuMSAzLjkgMjIgNSAyMkgxM1YyWiIgZmlsbD0iI0U1MDkxNCIvPgo8L3N2Zz4KPC9zdmc+';
+
+/**
+ * Returns a handler to set a fallback image when an image fails to load.
+ * Exported for unit testing and reuse.
+ *
+ * @param fallbackSrc - Data URI or URL to use as the fallback image.
+ */
+export const makeImageOnErrorHandler = (fallbackSrc: string) => {
+  return (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    const target = e.target as HTMLImageElement;
+    target.src = fallbackSrc;
+    target.onerror = null; // prevent loops
+  };
+};
+
+/**
+ * Format runtime minutes into a human-readable string (e.g., "2h 5m" or "45m").
+ * Exported for unit tests.
+ *
+ * @param minutes - Total runtime in minutes.
+ */
+export const formatRuntime = (minutes: number | undefined): string => {
+  const mins = Math.max(0, Math.floor(minutes || 0));
+  const hours = Math.floor(mins / 60);
+  const remainingMinutes = mins % 60;
+  if (hours === 0) return `${remainingMinutes}m`;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+/**
+ * Map internal collection types to display-friendly names.
+ * Exported for unit tests.
+ *
+ * @param type - Collection type key
+ */
+export const getTypeDisplayName = (type?: string): string => {
+  const typeMap: { [key: string]: string } = {
+    trilogy: 'Trilogy',
+    quadrilogy: 'Quadrilogy',
+    pentology: 'Pentology',
+    hexalogy: 'Hexalogy',
+    septology: 'Septology',
+    octology: 'Octology',
+    nonology: 'Nonology',
+    extended_series: 'Extended Series',
+    incomplete_series: 'Series',
+  };
+  if (!type) return 'Series';
+  return typeMap[type] || 'Series';
+};
+
+/**
+ * Build an array of backdrop URLs (max 3) for crossfade backgrounds.
+ * Exported for unit tests.
+ *
+ * @param parts - Collection parts array
+ */
+export const buildBackgroundImages = (parts: CollectionDetails['parts'] | undefined): string[] => {
+  if (!parts || parts.length === 0) return [];
+  return parts
+    .slice(0, 3)
+    .map((film) => getBackdropUrl(film.backdrop_path, 'w1280'))
+    .filter(Boolean);
+};
+
+/**
+ * Return the next film to watch: either user progress next_film or the first part.
+ * Exported for unit tests.
+ *
+ * @param collection - The collection details
+ */
+export const safeGetNextFilm = (collection: CollectionDetails): FilmItem | null => {
+  if (!collection) return null;
+  return (collection.user_progress?.next_film as FilmItem) || collection.parts?.[0] || null;
+};
+
+/**
+ * Calculate average rating of collection parts with safe guards.
+ * Exported for unit tests.
+ *
+ * @param parts - Array of film parts
+ */
+export const calculateAverageRating = (parts: CollectionDetails['parts'] | undefined): number => {
+  if (!parts || parts.length === 0) return 0;
+  const sum = parts.reduce((acc, film) => acc + (film.vote_average || 0), 0);
+  return sum / parts.length;
+};
+
+/**
+ * Validate incoming collection prop at runtime.
+ * Performs basic shape/type checks to guard component runtime usage.
+ *
+ * @param col - Unknown input to validate as CollectionDetails
+ * @returns true when input conforms to minimal CollectionDetails shape
+ */
+export const validateCollectionInput = (col: any): col is CollectionDetails => {
+  if (!col || typeof col !== 'object') return false;
+  if (typeof col.id !== 'number') return false;
+  if (typeof col.name !== 'string') return false;
+  if (!Array.isArray(col.parts)) return false;
+  if ('film_count' in col && typeof col.film_count !== 'number') return false;
+  // basic checks passed
+  return true;
+};
+
+const heroPosterOnError = makeImageOnErrorHandler(HERO_POSTER_PLACEHOLDER);
+const smallPosterOnError = makeImageOnErrorHandler(SMALL_POSTER_PLACEHOLDER);
+
 const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMarathon, onViewCollection, onHeroInteraction }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [progress, setProgress] = useState(0);
 
+  const isValidCollection = validateCollectionInput(collection);
+
   useEffect(() => {
+    if (!isValidCollection) return;
     const userProgress = CollectionsService.getFranchiseProgress(collection.id);
     if (userProgress) {
       setProgress(userProgress.completion_percentage);
     }
-  }, [collection.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collection?.id]);
 
   useEffect(() => {
-    // Rotate through different backdrop images
+    // Rotate through different backdrop images; guard against zero-length to avoid modulo by zero.
+    const rotationLimit = Math.max(Math.min(collection.parts?.length ?? 0, 3), 1);
     const interval = setInterval(() => {
-      setCurrentImageIndex((prevIndex) => 
-        (prevIndex + 1) % Math.min(collection.parts.length, 3)
+      setCurrentImageIndex((prevIndex) =>
+        (prevIndex + 1) % rotationLimit
       );
     }, 6000);
 
     return () => clearInterval(interval);
-  }, [collection.parts.length]);
+  }, [collection.parts?.length]);
 
-  const formatRuntime = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    if (hours === 0) return `${remainingMinutes}m`;
-    return `${hours}h ${remainingMinutes}m`;
-  };
+  if (!isValidCollection) {
+    console.error('CollectionsHero: invalid "collection" prop provided', collection);
+    return null;
+  }
 
-  const getTypeDisplayName = (type: string): string => {
-    const typeMap: { [key: string]: string } = {
-      'trilogy': 'Trilogy',
-      'quadrilogy': 'Quadrilogy',
-      'pentology': 'Pentology',
-      'hexalogy': 'Hexalogy',
-      'septology': 'Septology',
-      'octology': 'Octology',
-      'nonology': 'Nonology',
-      'extended_series': 'Extended Series',
-      'incomplete_series': 'Series'
-    };
-    return typeMap[type] || 'Series';
-  };
+  const backgroundImages = buildBackgroundImages(collection.parts);
 
-  const backgroundImages = collection.parts
-    .slice(0, 3)
-    .map(film => getBackdropUrl(film.backdrop_path, 'w1280'))
-    .filter(Boolean);
-
-
-
-  const nextFilm = collection.user_progress?.next_film || collection.parts[0];
+  const nextFilm = safeGetNextFilm(collection);
   const totalWatchTime = formatRuntime(collection.total_runtime);
-  const averageRating = collection.parts.reduce((sum, film) => sum + film.vote_average, 0) / collection.parts.length;
+  const averageRating = calculateAverageRating(collection.parts);
+
+  const firstYearNumber = collection.first_release_date ? new Date(collection.first_release_date).getFullYear() : null;
+  const latestYearNumber = collection.latest_release_date ? new Date(collection.latest_release_date).getFullYear() : null;
+  const yearRangeDisplay = firstYearNumber && latestYearNumber ? `${firstYearNumber} - ${latestYearNumber}` : 'N/A';
+  const yearSpanDisplay = (firstYearNumber && latestYearNumber) ? `${latestYearNumber - firstYearNumber + 1}` : 'multiple';
 
   return (
-    <div 
+    <div
       className="relative h-screen flex items-center"
       onMouseEnter={onHeroInteraction}
     >
@@ -87,7 +198,7 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
             />
           </div>
         ))}
-        
+
         {/* Gradient Overlays */}
         <div className="absolute inset-0 bg-gradient-to-r from-black via-transparent to-black opacity-80" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
@@ -103,14 +214,9 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
                 src={getPosterUrl(collection.poster_path, 'w500')}
                 alt={collection.name}
                 className="w-64 h-96 object-cover rounded-lg shadow-2xl transform hover:scale-105 transition-transform duration-300"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  // Fallback to themed poster placeholder for hero section
-                  target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAwIiBoZWlnaHQ9Ijc1MCIgdmlld0JveD0iMCAwIDUwMCA3NTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MDAiIGhlaWdodD0iNzUwIiBmaWxsPSIjMTQxNDE0Ii8+CjxyZWN0IHg9IjIwIiB5PSIyMCIgd2lkdGg9IjQ2MCIgaGVpZ2h0PSI3MTAiIHJ4PSIxMiIgZmlsbD0iIzJBMkEyQSIgc3Ryb2tlPSIjMzc0MTUxIiBzdHJva2Utd2lkdGg9IjIiLz4KPHN2ZyB4PSIyMjAiIHk9IjMzNSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTQgMlYyMEwxOSAxNVYxMUwxNCA2VjJaIiBmaWxsPSIjRTUwOTE0Ii8+CjxwYXRoIGQ9Ik0xMyAySDVDMy45IDIgMyAyLjkgMyA0VjIwQzMgMjEuMSAzLjkgMjIgNSAyMkgxM1YyWiIgZmlsbD0iI0U1MDkxNCIvPgo8L3N2Zz4KPHRleHQgeD0iMjUwIiB5PSI0MzAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iIzlDQTNBRiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q2luZUZsaXggQ29sbGVjdGlvbjwvdGV4dD4KPC9zdmc+';
-                  target.onerror = null; // Prevent infinite loop
-                }}
+                onError={heroPosterOnError}
               />
-              
+
               {/* Progress Ring */}
               {progress > 0 && (
                 <div className="absolute -top-3 -right-3 w-16 h-16">
@@ -148,14 +254,14 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
                   {getTypeDisplayName(collection.type)}
                 </span>
                 <span className="bg-gray-800 text-gray-300 px-3 py-1 rounded-full text-sm">
-                  {collection.status.charAt(0).toUpperCase() + collection.status.slice(1)}
+                  {(collection.status || '').charAt(0).toUpperCase() + (collection.status || '').slice(1)}
                 </span>
                 <div className="flex items-center space-x-1 bg-gray-800 text-yellow-400 px-3 py-1 rounded-full text-sm">
                   <Star className="w-4 h-4 fill-current" />
                   <span>{averageRating.toFixed(1)}</span>
                 </div>
               </div>
-              
+
               <h1 className="text-6xl lg:text-7xl font-bold text-white mb-2 leading-tight">
                 {collection.name}
               </h1>
@@ -174,20 +280,20 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
               <div className="flex items-center space-x-2">
                 <Calendar className="w-5 h-5" />
                 <span className="font-medium">
-                  {new Date(collection.first_release_date).getFullYear()} - {new Date(collection.latest_release_date).getFullYear()}
+                  {yearRangeDisplay}
                 </span>
               </div>
             </div>
 
             {/* Description */}
             <p className="text-xl text-gray-300 leading-relaxed mb-8 max-w-2xl">
-              {collection.overview || `Experience the complete ${collection.name} franchise. Follow the epic journey through ${collection.film_count} films spanning ${new Date(collection.latest_release_date).getFullYear() - new Date(collection.first_release_date).getFullYear() + 1} years of cinematic excellence.`}
+              {collection.overview || `Experience the complete ${collection.name} franchise. Follow the epic journey through ${collection.film_count} films spanning ${yearSpanDisplay} years of cinematic excellence.`}
             </p>
 
             {/* Genres */}
             <div className="flex flex-wrap gap-2 mb-8">
-              {collection.genre_categories.map((genre, index) => (
-                <span 
+              {(collection.genre_categories || []).map((genre, index) => (
+                <span
                   key={index}
                   className="bg-gray-800/50 border border-gray-700 text-gray-300 px-3 py-1 rounded-full text-sm backdrop-blur-sm"
                 >
@@ -198,22 +304,22 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
 
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-4 mb-8">
-              <button 
+              <button
                 onClick={onStartMarathon}
                 className="bg-red-600 hover:bg-red-700 text-white px-8 py-4 rounded-lg text-lg font-semibold transition-colors flex items-center space-x-3 group"
               >
                 <Play className="w-6 h-6 group-hover:scale-110 transition-transform" />
                 <span>{progress > 0 ? 'Continue Marathon' : 'Start Marathon'}</span>
               </button>
-              
-              <button 
+
+              <button
                 onClick={onViewCollection || onStartMarathon}
                 className="bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700 text-white px-8 py-4 rounded-lg text-lg font-semibold transition-colors backdrop-blur-sm flex items-center space-x-3"
               >
                 <Users className="w-6 h-6" />
                 <span>View Collection</span>
               </button>
-              
+
               <button className="bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700 text-white px-6 py-4 rounded-lg text-lg transition-colors backdrop-blur-sm">
                 <Star className="w-6 h-6" />
               </button>
@@ -226,31 +332,27 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
                   <h3 className="text-lg font-semibold text-white">Your Progress</h3>
                   <span className="text-red-400 font-bold">{Math.round(progress)}% Complete</span>
                 </div>
-                
+
                 <div className="w-full bg-gray-700 rounded-full h-3 mb-4">
-                  <div 
+                  <div
                     className="bg-gradient-to-r from-red-600 to-red-500 h-3 rounded-full transition-all duration-500"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                
+
                 {nextFilm && (
                   <div className="flex items-center space-x-4">
                     <img
                       src={getPosterUrl(nextFilm.poster_path, 'w92')}
                       alt={nextFilm.title}
                       className="w-12 h-18 object-cover rounded"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiB2aWV3Qm94PSIwIDAgOTIgMTM4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cmVjdCB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiBmaWxsPSIjMTQxNDE0Ii8+CjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI4NiIgaGVpZ2h0PSIxMzIiIHJ4PSI0IiBmaWxsPSIjMkEyQTJBIiBzdHJva2U9IiMzNzQxNTEiIHN0cm9rZS13aWR0aD0iMSIvPgo8c3ZnIHg9IjM2IiB5PSI1OSIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTQgMlYyMEwxOSAxNVYxMUwxNCA2VjJaIiBmaWxsPSIjRTUwOTE0Ii8+CjxwYXRoIGQ9Ik0xMyAySDVDMy45IDIgMyAyLjkgMyA0VjIwQzMgMjEuMSAzLjkgMjIgNSAyMkgxM1YyWiIgZmlsbD0iI0U1MDkxNCIvPgo8L3N2Zz4KPC9zdmc+';
-                        target.onerror = null;
-                      }}
+                      onError={smallPosterOnError}
                     />
                     <div className="flex-1">
                       <p className="text-sm text-gray-400">Up Next:</p>
                       <p className="text-white font-medium">{nextFilm.title}</p>
                       <p className="text-sm text-gray-400">
-                        {new Date(nextFilm.release_date).getFullYear()}
+                        {nextFilm.release_date ? new Date(nextFilm.release_date).getFullYear() : 'N/A'}
                       </p>
                     </div>
                     <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2">
@@ -266,8 +368,8 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
           {/* Film Preview Strip */}
           <div className="hidden xl:flex flex-col space-y-3">
             <h4 className="text-lg font-semibold text-white mb-2">Films in Collection</h4>
-            {collection.parts.slice(0, 4).map((film) => (
-              <div 
+            {(collection.parts || []).slice(0, 4).map((film) => (
+              <div
                 key={film.id}
                 className="flex items-center space-x-3 bg-gray-900/50 backdrop-blur-sm border border-gray-800 rounded-lg p-3 hover:bg-gray-800/50 transition-colors cursor-pointer group"
               >
@@ -275,25 +377,21 @@ const CollectionsHero: React.FC<CollectionsHeroProps> = ({ collection, onStartMa
                   src={getPosterUrl(film.poster_path, 'w92')}
                   alt={film.title}
                   className="w-10 h-15 object-cover rounded"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiB2aWV3Qm94PSIwIDAgOTIgMTM4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cmVjdCB3aWR0aD0iOTIiIGhlaWdodD0iMTM4IiBmaWxsPSIjMTQxNDE0Ii8+CjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI4NiIgaGVpZ2h0PSIxMzIiIHJ4PSI0IiBmaWxsPSIjMkEyQTJBIiBzdHJva2U9IiMzNzQxNTEiIHN0cm9rZS13aWR0aD0iMSIvPgo8c3ZnIHg9IjM2IiB5PSI1OSIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTQgMlYyMEwxOSAxNVYxMUwxNCA2VjJaIiBmaWxsPSIjRTUwOTE0Ii8+CjxwYXRoIGQ9Ik0xMyAySDVDMy45IDIgMyAyLjkgMyA0VjIwQzMgMjEuMSAzLjkgMjIgNSAyMkgxM1YyWiIgZmlsbD0iI0U1MDkxNCIvPgo8L3N2Zz4KPC9zdmc+';
-                    target.onerror = null;
-                  }}
+                  onError={smallPosterOnError}
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-medium text-sm truncate group-hover:text-red-400 transition-colors">
                     {film.title}
                   </p>
                   <p className="text-gray-400 text-xs">
-                    {new Date(film.release_date).getFullYear()}
+                    {film.release_date ? new Date(film.release_date).getFullYear() : 'N/A'}
                   </p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
               </div>
             ))}
-            
-            {collection.parts.length > 4 && (
+
+            {(collection.parts && collection.parts.length > 4) && (
               <div className="text-center py-2">
                 <span className="text-gray-400 text-sm">
                   +{collection.parts.length - 4} more films

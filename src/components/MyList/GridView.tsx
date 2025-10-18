@@ -18,6 +18,181 @@ import {
 import { MyListItem, ContentStatus, PriorityLevel } from '../../types/myList';
 import { Link } from 'react-router-dom';
 
+export type { MyListItem, ContentStatus, PriorityLevel };
+
+/**
+ * Safely read a field from item.content with deterministic fallback.
+ * @param item - the list item
+ * @param key - key to read from item.content
+ * @returns the value or undefined
+ */
+export const safeContentField = (item: MyListItem, key: string): any => {
+  try {
+    if (!item || typeof item !== 'object') return undefined;
+    const content = (item as any).content;
+    if (!content || typeof content !== 'object') return undefined;
+    return content[key];
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Returns an image URL or deterministic placeholder if path is falsy.
+ * @param path - poster path from TMDB
+ * @param size - size token for TMDB image
+ * @returns fully-qualified image URL or local placeholder
+ */
+export const getImageUrl = (path: string | null | undefined, size: string = 'w300'): string => {
+  if (!path) return '/api/placeholder/300/450';
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+};
+
+/**
+ * Derives a display title for the item with safe fallbacks.
+ * @param item - the list item
+ * @returns title string (never empty)
+ */
+export const getTitle = (item: MyListItem): string => {
+  const content = (item as any)?.content;
+  const title = content?.title || content?.name || content?.original_title || content?.original_name;
+  return typeof title === 'string' && title.trim().length > 0 ? title : 'Unknown Title';
+};
+
+/**
+ * Derives a display year or an empty string when unavailable.
+ * @param item - the list item
+ * @returns year as string or empty string
+ */
+export const getYear = (item: MyListItem): string => {
+  const date = safeContentField(item, 'release_date') || safeContentField(item, 'first_air_date');
+  if (!date) return '';
+  const parsed = Date.parse(date);
+  if (Number.isNaN(parsed)) return '';
+  try {
+    return new Date(parsed).getFullYear().toString();
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Formats runtime minutes to "Xh Ym" or "Xm" deterministically.
+ * @param minutes - runtime in minutes
+ * @returns human-readable runtime string
+ */
+export const formatRuntime = (minutes: number | null | undefined): string => {
+  const m = typeof minutes === 'number' && !Number.isNaN(minutes) && minutes >= 0 ? Math.floor(minutes) : 0;
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
+  if (hours > 0) {
+    return `${hours}h ${mins}m`;
+  }
+  return `${mins}m`;
+};
+
+/**
+ * Formats progress number to a percentage string with deterministic fallback.
+ * @param progress - progress as number (0-100)
+ * @returns percent string e.g. "23%"
+ */
+export const formatProgress = (progress: number | null | undefined): string => {
+  const p = typeof progress === 'number' && !Number.isNaN(progress) ? progress : 0;
+  return `${Math.round(p)}%`;
+};
+
+/**
+ * Maps priority levels to Tailwind color classes with deterministic fallback.
+ * @param priority - priority level
+ * @returns tailwind class string
+ */
+export const getPriorityColor = (priority: PriorityLevel | null | undefined): string => {
+  switch (priority) {
+    case 'high': return 'bg-red-500';
+    case 'medium': return 'bg-yellow-500';
+    case 'low': return 'bg-green-500';
+    default: return 'bg-gray-500';
+  }
+};
+
+/**
+ * Maps content status to tailwind text color classes with deterministic fallback.
+ * @param status - content status
+ * @returns tailwind class string for text color
+ */
+export const getStatusColor = (status: ContentStatus | null | undefined): string => {
+  switch (status) {
+    case 'completed': return 'text-green-400';
+    case 'inProgress': return 'text-yellow-400';
+    case 'dropped': return 'text-red-400';
+    default: return 'text-gray-400';
+  }
+};
+
+/**
+ * Returns a human readable status string (e.g. "inProgress" -> "in Progress").
+ * @param status - raw status value
+ */
+export const getStatusText = (status: ContentStatus | string | null | undefined): string => {
+  if (!status || typeof status !== 'string') return '';
+  return status.replace(/([A-Z])/g, ' $1').trim();
+};
+
+/**
+ * Safely extracts numeric vote average from item content.
+ * @param item - the list item
+ * @returns number or undefined
+ */
+export const getVoteAverage = (item: MyListItem): number | undefined => {
+  const v = safeContentField(item, 'vote_average');
+  return typeof v === 'number' && !Number.isNaN(v) ? v : undefined;
+};
+
+/**
+ * Safely derive progress value (0-100) from item.
+ * @param item - the list item
+ * @returns numeric progress (defaults to 0)
+ */
+export const getProgressValue = (item: MyListItem): number => {
+  const p = (item as any)?.progress;
+  return typeof p === 'number' && !Number.isNaN(p) ? p : 0;
+};
+
+/**
+ * Safely returns custom tags array from item.
+ * @param item - the list item
+ * @returns array of strings
+ */
+export const getCustomTags = (item: MyListItem): string[] => {
+  const tags = (item as any)?.customTags;
+  return Array.isArray(tags) ? tags : [];
+};
+
+/**
+ * Formats dateAdded string to local date or fallback.
+ * @param date - date string
+ * @returns formatted date string or 'Unknown date'
+ */
+export const formatDateAdded = (date?: string | null): string => {
+  if (!date || typeof date !== 'string') return 'Unknown date';
+  const parsed = Date.parse(date);
+  if (Number.isNaN(parsed)) return 'Unknown date';
+  try {
+    return new Date(parsed).toLocaleDateString();
+  } catch {
+    return 'Unknown date';
+  }
+};
+
+/**
+ * Checks whether an item id is present in selectedItems.
+ * @param itemId - id to check
+ * @param selectedItems - selected ids array
+ */
+export const isItemSelected = (itemId: string, selectedItems?: string[] | null): boolean => {
+  return Array.isArray(selectedItems) && selectedItems.includes(itemId);
+};
+
 interface GridViewProps {
   items: MyListItem[];
   selectedItems: string[];
@@ -26,6 +201,17 @@ interface GridViewProps {
   onItemRemove: (itemId: string) => void;
 }
 
+/**
+ * GridView
+ * Renders a responsive grid of list items as cards.
+ *
+ * Props:
+ * - items: array of MyListItem (if empty or invalid, renders a deterministic empty state)
+ * - selectedItems: array of selected item ids
+ * - onItemSelect: callback when an item is toggled
+ * - onItemUpdate: callback to update item fields (status, priority, progress, etc.)
+ * - onItemRemove: callback to remove item from list
+ */
 const GridView: React.FC<GridViewProps> = ({
   items,
   selectedItems,
@@ -35,50 +221,11 @@ const GridView: React.FC<GridViewProps> = ({
 }) => {
   const [showingMenu, setShowingMenu] = useState<string | null>(null);
 
-  const getImageUrl = (path: string | null, size: string = 'w300') => {
-    if (!path) return '/api/placeholder/300/450';
-    return `https://image.tmdb.org/t/p/${size}${path}`;
-  };
-
-  const getTitle = (item: MyListItem) => {
-    return (item.content as any).title || (item.content as any).name || 'Unknown Title';
-  };
-
-  const getYear = (item: MyListItem) => {
-    const date = (item.content as any).release_date || (item.content as any).first_air_date;
-    return date ? new Date(date).getFullYear() : '';
-  };
-
-  const formatRuntime = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins}m`;
-  };
-
-  const formatProgress = (progress: number) => {
-    return `${Math.round(progress)}%`;
-  };
-
-  const getPriorityColor = (priority: PriorityLevel) => {
-    switch (priority) {
-      case 'high': return 'bg-red-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'low': return 'bg-green-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  const getStatusColor = (status: ContentStatus) => {
-    switch (status) {
-      case 'completed': return 'text-green-400';
-      case 'inProgress': return 'text-yellow-400';
-      case 'dropped': return 'text-red-400';
-      default: return 'text-gray-400';
-    }
-  };
+  if (!Array.isArray(items) || items.length === 0) {
+    return (
+      <div className="text-gray-400">No items to display</div>
+    );
+  }
 
   const handleStatusChange = (itemId: string, status: ContentStatus) => {
     const progress = status === 'completed' ? 100 : status === 'notStarted' ? 0 : undefined;
@@ -92,7 +239,22 @@ const GridView: React.FC<GridViewProps> = ({
   };
 
   const ItemCard: React.FC<{ item: MyListItem }> = ({ item }) => {
-    const isSelected = selectedItems.includes(item.id);
+    const isSelected = isItemSelected(item.id, selectedItems);
+
+    const posterPath = safeContentField(item, 'poster_path') as string | null | undefined;
+    const imageUrl = getImageUrl(posterPath);
+    const title = getTitle(item);
+    const year = getYear(item);
+    const runtime = formatRuntime((item as any)?.estimatedRuntime);
+    const statusText = getStatusText(item.status);
+    const statusColorClass = getStatusColor(item.status);
+    const priorityDotClass = getPriorityColor(item.priority);
+    const voteAverage = getVoteAverage(item);
+    const hasVoteAverage = typeof voteAverage === 'number' && voteAverage > 0;
+    const progressValue = getProgressValue(item);
+    const hasProgress = progressValue > 0;
+    const customTagsArray = getCustomTags(item);
+    const dateAdded = formatDateAdded((item as any)?.dateAdded);
 
     return (
       <div className="group relative bg-gray-900 rounded-lg overflow-hidden hover:scale-105 transition-all duration-200">
@@ -115,7 +277,7 @@ const GridView: React.FC<GridViewProps> = ({
         </div>
 
         {/* Priority Indicator */}
-        <div className={`absolute top-2 right-2 w-3 h-3 rounded-full ${getPriorityColor(item.priority)}`}></div>
+        <div className={`absolute top-2 right-2 w-3 h-3 rounded-full ${priorityDotClass}`}></div>
 
         {/* Liked Indicator */}
         {item.isLiked && (
@@ -217,22 +379,22 @@ const GridView: React.FC<GridViewProps> = ({
         <Link to={`/${item.contentType}/${item.contentId}`} className="block">
           <div className="aspect-[2/3] relative">
             <img
-              src={getImageUrl(item.content.poster_path)}
-              alt={getTitle(item)}
+              src={imageUrl}
+              alt={title}
               className="w-full h-full object-cover"
               loading="lazy"
             />
             
             {/* Progress Bar */}
-            {item.progress > 0 && (
+            {hasProgress && (
               <div className="absolute bottom-0 left-0 right-0 bg-black/80 p-2">
                 <div className="w-full bg-gray-600 rounded-full h-1 mb-1">
                   <div 
                     className="bg-netflix-red h-1 rounded-full transition-all duration-300"
-                    style={{ width: `${item.progress}%` }}
+                    style={{ width: `${progressValue}%` }}
                   />
                 </div>
-                <p className="text-xs text-white">{formatProgress(item.progress)} watched</p>
+                <p className="text-xs text-white">{formatProgress(progressValue)} watched</p>
               </div>
             )}
 
@@ -245,45 +407,45 @@ const GridView: React.FC<GridViewProps> = ({
 
         {/* Card Info */}
         <div className="p-3">
-          <h3 className="text-white font-medium text-sm mb-2 line-clamp-2">{getTitle(item)}</h3>
+          <h3 className="text-white font-medium text-sm mb-2 line-clamp-2">{title}</h3>
           
           <div className="space-y-1 text-xs text-gray-400">
             <div className="flex items-center justify-between">
-              <span>{getYear(item)}</span>
+              <span>{year}</span>
               <span className="capitalize">{item.contentType}</span>
             </div>
             
             <div className="flex items-center justify-between">
-              <span>{formatRuntime(item.estimatedRuntime)}</span>
-              <span className={getStatusColor(item.status)}>
-                {item.status.replace(/([A-Z])/g, ' $1').trim()}
+              <span>{runtime}</span>
+              <span className={statusColorClass}>
+                {statusText}
               </span>
             </div>
 
-            {item.content.vote_average > 0 && (
+            {hasVoteAverage && (
               <div className="flex items-center gap-1">
                 <Star className="w-3 h-3 text-yellow-400" />
-                <span>{item.content.vote_average.toFixed(1)}</span>
+                <span>{(voteAverage as number).toFixed(1)}</span>
               </div>
             )}
 
-            {item.personalRating && (
+            {typeof item.personalRating === 'number' && (
               <div className="flex items-center gap-1">
                 <span className="text-yellow-400">★</span>
                 <span>Your rating: {item.personalRating}/5</span>
               </div>
             )}
 
-            {item.customTags.length > 0 && (
+            {customTagsArray.length > 0 && (
               <div className="flex items-center gap-1">
                 <Tag className="w-3 h-3" />
-                <span className="truncate">{item.customTags.join(', ')}</span>
+                <span className="truncate">{customTagsArray.join(', ')}</span>
               </div>
             )}
 
             <div className="flex items-center gap-1 text-xs">
               <Calendar className="w-3 h-3" />
-              <span>Added {new Date(item.dateAdded).toLocaleDateString()}</span>
+              <span>Added {dateAdded}</span>
             </div>
           </div>
         </div>

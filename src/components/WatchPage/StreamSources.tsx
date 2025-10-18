@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Play,
@@ -13,79 +13,255 @@ interface StreamSourcesProps {
   sources: StreamSource[];
   onSourceSelect?: (source: StreamSource) => void;
   selectedSource?: StreamSource | null;
+  /**
+   * Optional injected loader function for loading a source.
+   * If not provided the component will simulate a 1.5s load.
+   */
+  loadSource?: (source: StreamSource) => Promise<void>;
 }
 
-const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, selectedSource }) => {
-  const [loadingSource, setLoadingSource] = useState<string | null>(null);
+/**
+ * Typing for an injected loader function used to load a StreamSource.
+ */
+export type LoadSourceFn = (source: StreamSource) => Promise<void>;
 
-  // Group sources by service provider
-  const rivestreamSources = sources.filter(source => source.id.startsWith('rivestream_server_'));
-  const rivestreamS2Sources = sources.filter(source => source.id.startsWith('rivestream_s2_'));
-  const vidsrcSources = sources.filter(source => source.id.startsWith('vidsrc_api_'));
-  const vidsrcPremiumSources = sources.filter(source => source.id.startsWith('vidsrc_premium_'));
-  const smashystreamSources = sources.filter(source => source.id.startsWith('smashystream_'));
-  const movies111Sources = sources.filter(source => source.id.startsWith('111movies_'));
-  const otherSources = sources.filter(source => 
-    !source.id.startsWith('rivestream_server_') && 
-    !source.id.startsWith('rivestream_s2_') &&
-    !source.id.startsWith('vidsrc_api_') &&
-    !source.id.startsWith('vidsrc_premium_') &&
-    !source.id.startsWith('smashystream_') &&
-    !source.id.startsWith('111movies_')
-  );
+/**
+ * Typing for the select handler returned by createSelectHandler.
+ */
+export type SelectHandler = (source: StreamSource) => Promise<void>;
 
+/**
+ * Validate that an external source shape is well-formed and safe to use.
+ * Centralizes sanitization/validation logic so the rest of the component can rely on it.
+ *
+ * @param source - candidate stream source
+ * @returns whether the source is a valid StreamSource
+ */
+export const validateSource = (source: StreamSource | null | undefined): source is StreamSource => {
+  if (!source || typeof source !== 'object') return false;
+  const hasId = typeof (source as any).id === 'string' && (source as any).id.length > 0;
+  const hasName = typeof (source as any).name === 'string';
+  const hasUrl = typeof (source as any).url === 'string';
+  const hasQuality = typeof (source as any).quality === 'string';
+  const hasType = typeof (source as any).type === 'string';
+  return hasId && hasName && hasUrl && hasQuality && hasType;
+};
 
+/**
+ * Sanitize an incoming list of sources by validating and shallow-cloning entries.
+ * Exported to centralize input sanitization and make behavior testable.
+ *
+ * @param sources - raw incoming sources (may be null/undefined)
+ * @returns an array of validated StreamSource objects
+ */
+export const sanitizeSources = (sources?: StreamSource[] | null): StreamSource[] => {
+  const list = sources || [];
+  return list.filter(validateSource).map(s => ({ ...s }));
+};
 
-  const handleSelectSource = async (source: StreamSource) => {
+type GroupedSources = {
+  rivestream: StreamSource[];
+  rivestreamS2: StreamSource[];
+  vidsrc: StreamSource[];
+  vidsrcPremium: StreamSource[];
+  smashystream: StreamSource[];
+  movies111: StreamSource[];
+  other: StreamSource[];
+};
+
+/**
+ * Pure function: group and filter incoming sources into categorized buckets.
+ * Exported for unit testing and to keep source-selection logic isolated.
+ *
+ * Note: This function expects raw input and will call sanitizeSources internally.
+ *
+ * @param sources - raw incoming sources
+ * @returns grouped sources object
+ */
+export const groupSources = (sources: StreamSource[]): GroupedSources => {
+  const safeSources = sanitizeSources(sources || []);
+
+  const rivestream = safeSources.filter(s => s.id.startsWith('rivestream_server_'));
+  const rivestreamS2 = safeSources.filter(s => s.id.startsWith('rivestream_s2_'));
+  const vidsrc = safeSources.filter(s => s.id.startsWith('vidsrc_api_'));
+  const vidsrcPremium = safeSources.filter(s => s.id.startsWith('vidsrc_premium_'));
+  const smashystream = safeSources.filter(s => s.id.startsWith('smashystream_'));
+  const movies111 = safeSources.filter(s => s.id.startsWith('111movies_'));
+
+  const knownIds = new Set([
+    ...rivestream.map(s => s.id),
+    ...rivestreamS2.map(s => s.id),
+    ...vidsrc.map(s => s.id),
+    ...vidsrcPremium.map(s => s.id),
+    ...smashystream.map(s => s.id),
+    ...movies111.map(s => s.id)
+  ]);
+
+  const other = safeSources.filter(s => !knownIds.has(s.id));
+
+  return {
+    rivestream,
+    rivestreamS2,
+    vidsrc,
+    vidsrcPremium,
+    smashystream,
+    movies111,
+    other
+  };
+};
+
+const _groupCache = new WeakMap<any, GroupedSources>();
+
+/**
+ * Memoized wrapper around groupSources that caches results by the input array
+ * reference. This avoids recomputing expensive grouping logic when the same
+ * array instance is passed through React re-renders.
+ *
+ * @param sources - raw incoming sources
+ * @returns grouped sources object (cached when possible)
+ */
+export const memoizedGroupSources = (sources: StreamSource[]): GroupedSources => {
+  if (_groupCache.has(sources)) {
+    return _groupCache.get(sources)!;
+  }
+  const grouped = groupSources(sources);
+  _groupCache.set(sources, grouped);
+  return grouped;
+};
+
+/**
+ * Returns a Tailwind class string for the quality badge.
+ * Exported to allow unit tests and reuse.
+ *
+ * @param quality - quality label string (e.g., '4K', 'HD')
+ * @returns Tailwind classes
+ */
+export const getQualityColor = (quality: string): string => {
+  switch (quality) {
+    case '4K':
+      return 'text-purple-400 bg-purple-500/20';
+    case 'FHD':
+      return 'text-blue-400 bg-blue-500/20';
+    case 'HD':
+      return 'text-green-400 bg-green-500/20';
+    case 'SD':
+      return 'text-yellow-400 bg-yellow-500/20';
+    default:
+      return 'text-gray-400 bg-gray-500/20';
+  }
+};
+
+/**
+ * Simple mapping from source type to an icon. Exported for tests.
+ *
+ * @param type - source type string
+ * @returns emoji string representing the type
+ */
+export const getTypeIcon = (type: string): string => {
+  switch (type) {
+    case 'hls':
+      return '🎬';
+    case 'direct':
+      return '⚡';
+    case 'mp4':
+      return '📹';
+    default:
+      return '🔗';
+  }
+};
+
+/**
+ * Create a selection handler that coordinates loading state, error handling,
+ * and optional injected loader logic. This is exported so it can be unit tested
+ * in isolation by passing mock setter functions.
+ *
+ * @param loadSource - optional injected loader function
+ * @param onSourceSelect - optional callback fired on successful load
+ * @param setLoadingSource - setter to update loading source id
+ * @param setLoadingError - setter to update error message
+ * @returns an async function that will attempt to load the provided source
+ */
+export const createSelectHandler = (
+  loadSource?: LoadSourceFn,
+  onSourceSelect?: (source: StreamSource) => void,
+  setLoadingSource?: (id: string | null) => void,
+  setLoadingError?: (msg: string | null) => void
+): SelectHandler => {
+  return async (source: StreamSource) => {
     // Don't allow selection of placeholder sources
     if (source.url === '') {
       return;
     }
 
-    setLoadingSource(source.id);
-    
-    // Simulate loading time
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setLoadingSource(null);
-    
-    // Update parent component
-    if (onSourceSelect) {
-      onSourceSelect(source);
-    }
-    
-    console.log('Loading stream from:', source.name, source.url);
-  };
+    setLoadingError && setLoadingError(null);
+    setLoadingSource && setLoadingSource(source.id);
 
-  const getQualityColor = (quality: string) => {
-    switch (quality) {
-      case '4K':
-        return 'text-purple-400 bg-purple-500/20';
-      case 'FHD':
-        return 'text-blue-400 bg-blue-500/20';
-      case 'HD':
-        return 'text-green-400 bg-green-500/20';
-      case 'SD':
-        return 'text-yellow-400 bg-yellow-500/20';
-      default:
-        return 'text-gray-400 bg-gray-500/20';
-    }
-  };
+    try {
+      if (loadSource) {
+        // Allow injected implementation to perform the network call / logic
+        await loadSource(source);
+      } else {
+        // Default simulated loading behavior to maintain previous UX
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
 
+      // Update parent component on successful load
+      if (onSourceSelect) {
+        onSourceSelect(source);
+      }
 
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'hls':
-        return '🎬';
-      case 'direct':
-        return '⚡';
-      case 'mp4':
-        return '📹';
-      default:
-        return '🔗';
+      // Logging for debug - preserved behavior
+      // eslint-disable-next-line no-console
+      console.log('Loading stream from:', source.name, source.url);
+    } catch (err: any) {
+      const message = err && err.message ? err.message : 'Failed to load source';
+      setLoadingError && setLoadingError(message);
+      // eslint-disable-next-line no-console
+      console.error('Error loading source:', message, err);
+    } finally {
+      setLoadingSource && setLoadingSource(null);
     }
   };
+};
+
+/**
+ * StreamSources component
+ *
+ * Displays grouped streaming sources and allows selecting/loading them.
+ *
+ * - sources: list of StreamSource objects (validated internally)
+ * - onSourceSelect: callback when a source is successfully selected
+ * - selectedSource: currently active source
+ * - loadSource: optional injected async function to actually load a source (useful for tests / DI)
+ */
+const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, selectedSource, loadSource }) => {
+  const [loadingSource, setLoadingSource] = useState<string | null>(null);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+
+  // Memoize grouped lists to avoid recomputing on each render. Use the
+  // memoizedGroupSources helper so callers can benefit from reference-based caching.
+  const {
+    rivestream: rivestreamSources,
+    rivestreamS2: rivestreamS2Sources,
+    vidsrc: vidsrcSources,
+    vidsrcPremium: vidsrcPremiumSources,
+    smashystream: smashystreamSources,
+    movies111: movies111Sources,
+    other: otherSources
+  } = useMemo(() => memoizedGroupSources(sources), [sources]);
+
+  /**
+   * Handler to select and load a source.
+   * Uses injected loadSource when available, otherwise simulates a load.
+   * Provides explicit error feedback via loadingError state.
+   *
+   * The implementation is delegated to createSelectHandler to keep logic
+   * pure and testable; here we bind state setters for runtime usage.
+   */
+  const handleSelectSource = useCallback(
+    createSelectHandler(loadSource, onSourceSelect, setLoadingSource, setLoadingError),
+    [loadSource, onSourceSelect]
+  );
 
   return (
     <div className="space-y-6">
@@ -98,12 +274,23 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             {sources.length} Available
           </span>
         </div>
-        
+
         <div className="flex items-center space-x-2 text-sm text-gray-400">
           <Clock className="h-4 w-4" />
           <span>Auto-quality based on connection</span>
         </div>
       </div>
+
+      {/* Error feedback for failed loads */}
+      {loadingError && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200"
+        >
+          <strong>Error:</strong> {loadingError}
+        </motion.div>
+      )}
 
       {/* Selected Source Info */}
       {selectedSource && (
@@ -119,7 +306,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <span className="text-green-400 text-sm">Live</span>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-gray-400">Source:</span>
@@ -176,7 +363,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">🎬</span>
               </div>
-              
+
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                 Vidjoy
@@ -293,7 +480,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <div className="w-8 h-8 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">🚀</span>
               </div>
-              
+
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                 RiveStream S2
@@ -321,9 +508,9 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               {rivestreamS2Sources.some(s => loadingSource === s.id) && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-800/80 rounded-lg">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#ff0000] border-t-transparent"></div>
-                </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                  </div>
           </motion.div>
         )}
 
@@ -352,7 +539,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <div className="w-8 h-8 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">⭐</span>
               </div>
-              
+
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                 VidSrc Premium
@@ -427,7 +614,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
                 const isSelected = selectedSource?.id === source.id;
                 const isDefault = source.id === 'rivestream_server_2';
                 const serverNum = source.id.split('_')[2];
-                
+
                 return (
                   <button
                     key={source.id}
@@ -504,7 +691,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
                 const isLoading = loadingSource === source.id;
                 const isSelected = selectedSource?.id === source.id;
                 const apiNum = source.id.split('_')[2];
-                
+
                 // Get API description
                 const getAPIDescription = (api: string) => {
                   switch(api) {
@@ -515,7 +702,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
                     default: return `API ${api}`;
                   }
                 };
-                
+
                 return (
                   <button
                     key={source.id}
@@ -576,7 +763,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <div className="w-8 h-8 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">⚡</span>
               </div>
-              
+
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                 SmashyStream
@@ -635,7 +822,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               <div className="w-8 h-8 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">🎯</span>
               </div>
-              
+
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                 111movies
@@ -676,7 +863,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
           const isSelected = selectedSource?.id === source.id;
           const isBeech = source.id === 'beech_player';
           const isVidFast = source.id === 'vidfast_player';
-          
+
           return (
             <motion.div
               key={source.id}
@@ -710,7 +897,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
                      isVidFast ? '⚡' : getTypeIcon(source.type)}
                   </span>
                 </div>
-                
+
                 {/* Service Name */}
                 <h3 className="text-white font-medium text-sm mb-1 leading-tight">
                   {source.name}

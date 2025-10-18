@@ -10,124 +10,233 @@ import {
 } from 'lucide-react';
 import { MyListItem } from '../../types/myList';
 
+type ExportFormat = 'pdf' | 'csv' | 'json' | 'text';
+
 interface ExportModalProps {
   items: MyListItem[];
   onClose: () => void;
 }
 
+interface ExportOptions {
+  includeProgress: boolean;
+  includeNotes: boolean;
+  includeTags: boolean;
+}
+
+export interface SerializedExportItem {
+  title: string;
+  year: string | number | '';
+  type: string;
+  runtime: number;
+  status: string;
+  rating: number;
+  dateAdded: string;
+  progress?: number;
+  notes?: string;
+  tags?: string[];
+  tmdbId?: number | string;
+  overview?: string;
+  posterPath?: string;
+}
+
+/**
+ * Validate that the provided items are in the expected shape for export.
+ * Throws an Error if validation fails.
+ */
+export const validateExportItems = (items: MyListItem[]): void => {
+  if (!Array.isArray(items)) {
+    throw new Error('Export items must be an array');
+  }
+  // Minimal validation of the first item shape to catch misconfiguration early
+  if (items.length > 0) {
+    const sample = items[0] as any;
+    if (!sample.content || !sample.contentType || typeof sample.dateAdded === 'undefined') {
+      throw new Error('Export items appear malformed; missing expected fields');
+    }
+  }
+};
+
+/**
+ * Format runtime (minutes) into a human-readable string.
+ */
+export const formatRuntime = (minutes: number): string => {
+  const minsValue = typeof minutes === 'number' && !isNaN(minutes) ? Math.max(0, Math.floor(minutes)) : 0;
+  const hours = Math.floor(minsValue / 60);
+  const mins = minsValue % 60;
+  if (hours > 0) {
+    return `${hours}h ${mins}m`;
+  }
+  return `${mins}m`;
+};
+
+/**
+ * Extract common serialized fields from a MyListItem.
+ * Kept internal to avoid duplicating logic across serializers.
+ */
+export const extractSerializedItem = (item: MyListItem, options: ExportOptions): SerializedExportItem => {
+  const contentAny = (item && (item as any).content) ? (item as any).content : {};
+  const title = contentAny.title || contentAny.name || 'Unknown Title';
+  const date = contentAny.release_date || contentAny.first_air_date;
+  const year = date ? new Date(date).getFullYear() : '';
+  const runtimeVal = typeof (item as any).estimatedRuntime === 'number' && !isNaN((item as any).estimatedRuntime)
+    ? (item as any).estimatedRuntime
+    : Number(contentAny.runtime) || 0;
+  const ratingVal = typeof contentAny.vote_average === 'number' && !isNaN(contentAny.vote_average)
+    ? contentAny.vote_average
+    : Number(contentAny.vote_average) || 0;
+
+  const dateAddedVal = typeof item.dateAdded !== 'undefined' && item.dateAdded !== null
+    ? String(item.dateAdded)
+    : new Date().toISOString();
+
+  const serialized: SerializedExportItem = {
+    title,
+    year,
+    type: item.contentType,
+    runtime: runtimeVal,
+    status: item.status,
+    rating: ratingVal,
+    dateAdded: dateAddedVal,
+    tmdbId: item.contentId,
+    overview: contentAny.overview,
+    posterPath: contentAny.poster_path
+  };
+
+  if (options.includeProgress) {
+    serialized.progress = (item as any).progress ?? 0;
+  }
+
+  if (options.includeNotes && (item as any).personalNotes) {
+    serialized.notes = (item as any).personalNotes;
+  }
+
+  if (options.includeTags && (item as any).customTags && (item as any).customTags.length > 0) {
+    serialized.tags = (item as any).customTags;
+  }
+
+  return serialized;
+};
+
+/**
+ * Serialize items to CSV format.
+ * Exported as a pure function for unit testing.
+ */
+export const serializeToCSV = (items: MyListItem[], options: ExportOptions): string => {
+  validateExportItems(items);
+
+  const opts: ExportOptions = {
+    includeProgress: Boolean(options?.includeProgress),
+    includeNotes: Boolean(options?.includeNotes),
+    includeTags: Boolean(options?.includeTags)
+  };
+
+  const headers = [
+    'Title',
+    'Year',
+    'Type',
+    'Runtime',
+    'Status',
+    'Rating',
+    'Date Added',
+    ...(opts.includeProgress ? ['Progress'] : []),
+    ...(opts.includeNotes ? ['Notes'] : []),
+    ...(opts.includeTags ? ['Tags'] : [])
+  ];
+
+  const rows = items.map(item => {
+    const s = extractSerializedItem(item, opts);
+    return [
+      s.title,
+      s.year,
+      s.type,
+      formatRuntime(s.runtime),
+      s.status,
+      (s.rating || 0).toFixed(1),
+      new Date(s.dateAdded).toLocaleDateString(),
+      ...(opts.includeProgress ? [`${s.progress ?? 0}%`] : []),
+      ...(opts.includeNotes ? [s.notes || ''] : []),
+      ...(opts.includeTags ? [(s.tags || []).join(', ')] : [])
+    ];
+  });
+
+  const csvContent = [headers, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  return csvContent;
+};
+
+/**
+ * Serialize items to pretty JSON.
+ * Exported as a pure function for unit testing.
+ */
+export const serializeToJSON = (items: MyListItem[], options: ExportOptions): string => {
+  validateExportItems(items);
+
+  const opts: ExportOptions = {
+    includeProgress: Boolean(options?.includeProgress),
+    includeNotes: Boolean(options?.includeNotes),
+    includeTags: Boolean(options?.includeTags)
+  };
+
+  const exportData: SerializedExportItem[] = items.map(item => extractSerializedItem(item, opts));
+  return JSON.stringify(exportData, null, 2);
+};
+
+/**
+ * Serialize items to plain text report.
+ * Exported as a pure function for unit testing.
+ */
+export const serializeToText = (items: MyListItem[], options: ExportOptions): string => {
+  validateExportItems(items);
+
+  const opts: ExportOptions = {
+    includeProgress: Boolean(options?.includeProgress),
+    includeNotes: Boolean(options?.includeNotes),
+    includeTags: Boolean(options?.includeTags)
+  };
+
+  let content = `My CineFlix Watchlist\n`;
+  content += `Generated on ${new Date().toLocaleDateString()}\n`;
+  content += `Total items: ${items.length}\n\n`;
+
+  items.forEach((item, index) => {
+    const s = extractSerializedItem(item, opts);
+    content += `${index + 1}. ${s.title} (${s.year})\n`;
+    content += `   Type: ${s.type}\n`;
+    content += `   Runtime: ${formatRuntime(s.runtime)}\n`;
+    content += `   Status: ${s.status}\n`;
+    content += `   Rating: ${(s.rating || 0).toFixed(1)}/10\n`;
+    content += `   Added: ${new Date(s.dateAdded).toLocaleDateString()}\n`;
+
+    if (opts.includeProgress && typeof s.progress !== 'undefined' && s.progress > 0) {
+      content += `   Progress: ${s.progress}%\n`;
+    }
+
+    if (opts.includeNotes && s.notes) {
+      content += `   Notes: ${s.notes}\n`;
+    }
+
+    if (opts.includeTags && s.tags && s.tags.length > 0) {
+      content += `   Tags: ${s.tags.join(', ')}\n`;
+    }
+
+    content += '\n';
+  });
+
+  return content;
+};
+
 const ExportModal: React.FC<ExportModalProps> = ({
   items,
   onClose
 }) => {
-  const [exportFormat, setExportFormat] = useState<'pdf' | 'csv' | 'json' | 'text'>('pdf');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
   const [includeProgress, setIncludeProgress] = useState(true);
   const [includeNotes, setIncludeNotes] = useState(true);
   const [includeTags, setIncludeTags] = useState(true);
   const [shareableLink, setShareableLink] = useState('');
   const [copied, setCopied] = useState(false);
-
-  const getTitle = (item: MyListItem) => {
-    return (item.content as any).title || (item.content as any).name || 'Unknown Title';
-  };
-
-  const getYear = (item: MyListItem) => {
-    const date = (item.content as any).release_date || (item.content as any).first_air_date;
-    return date ? new Date(date).getFullYear() : '';
-  };
-
-  const formatRuntime = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins}m`;
-  };
-
-  const generateCSV = () => {
-    const headers = [
-      'Title',
-      'Year',
-      'Type',
-      'Runtime',
-      'Status',
-      'Rating',
-      'Date Added',
-      ...(includeProgress ? ['Progress'] : []),
-      ...(includeNotes ? ['Notes'] : []),
-      ...(includeTags ? ['Tags'] : [])
-    ];
-
-    const rows = items.map(item => [
-      getTitle(item),
-      getYear(item),
-      item.contentType,
-      formatRuntime(item.estimatedRuntime),
-      item.status,
-      item.content.vote_average.toFixed(1),
-      new Date(item.dateAdded).toLocaleDateString(),
-      ...(includeProgress ? [`${item.progress}%`] : []),
-      ...(includeNotes ? [item.personalNotes || ''] : []),
-      ...(includeTags ? [item.customTags.join(', ')] : [])
-    ]);
-
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
-      .join('\n');
-
-    return csvContent;
-  };
-
-  const generateJSON = () => {
-    const exportData = items.map(item => ({
-      title: getTitle(item),
-      year: getYear(item),
-      type: item.contentType,
-      runtime: item.estimatedRuntime,
-      status: item.status,
-      rating: item.content.vote_average,
-      dateAdded: item.dateAdded,
-      ...(includeProgress && { progress: item.progress }),
-      ...(includeNotes && item.personalNotes && { notes: item.personalNotes }),
-      ...(includeTags && item.customTags.length > 0 && { tags: item.customTags }),
-      tmdbId: item.contentId,
-      overview: item.content.overview,
-      posterPath: item.content.poster_path
-    }));
-
-    return JSON.stringify(exportData, null, 2);
-  };
-
-  const generateText = () => {
-    let content = `My CineFlix Watchlist\n`;
-    content += `Generated on ${new Date().toLocaleDateString()}\n`;
-    content += `Total items: ${items.length}\n\n`;
-
-    items.forEach((item, index) => {
-      content += `${index + 1}. ${getTitle(item)} (${getYear(item)})\n`;
-      content += `   Type: ${item.contentType}\n`;
-      content += `   Runtime: ${formatRuntime(item.estimatedRuntime)}\n`;
-      content += `   Status: ${item.status}\n`;
-      content += `   Rating: ${item.content.vote_average.toFixed(1)}/10\n`;
-      content += `   Added: ${new Date(item.dateAdded).toLocaleDateString()}\n`;
-      
-      if (includeProgress && item.progress > 0) {
-        content += `   Progress: ${item.progress}%\n`;
-      }
-      
-      if (includeNotes && item.personalNotes) {
-        content += `   Notes: ${item.personalNotes}\n`;
-      }
-      
-      if (includeTags && item.customTags.length > 0) {
-        content += `   Tags: ${item.customTags.join(', ')}\n`;
-      }
-      
-      content += '\n';
-    });
-
-    return content;
-  };
 
   const downloadFile = (content: string, filename: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
@@ -143,48 +252,68 @@ const ExportModal: React.FC<ExportModalProps> = ({
 
   const handleExport = () => {
     const timestamp = new Date().toISOString().split('T')[0];
-    
-    switch (exportFormat) {
-      case 'csv':
-        downloadFile(
-          generateCSV(),
-          `cineflix-watchlist-${timestamp}.csv`,
-          'text/csv'
-        );
-        break;
-      case 'json':
-        downloadFile(
-          generateJSON(),
-          `cineflix-watchlist-${timestamp}.json`,
-          'application/json'
-        );
-        break;
-      case 'text':
-        downloadFile(
-          generateText(),
-          `cineflix-watchlist-${timestamp}.txt`,
-          'text/plain'
-        );
-        break;
-      case 'pdf':
-        // For PDF generation, you would typically use a library like jsPDF
-        // For now, we'll export as text
-        downloadFile(
-          generateText(),
-          `cineflix-watchlist-${timestamp}.txt`,
-          'text/plain'
-        );
-        break;
+    const options: ExportOptions = {
+      includeProgress,
+      includeNotes,
+      includeTags
+    };
+
+    try {
+      validateExportItems(items);
+
+      switch (exportFormat) {
+        case 'csv': {
+          const content = serializeToCSV(items, options);
+          downloadFile(content, `cineflix-watchlist-${timestamp}.csv`, 'text/csv');
+          break;
+        }
+        case 'json': {
+          const content = serializeToJSON(items, options);
+          downloadFile(content, `cineflix-watchlist-${timestamp}.json`, 'application/json');
+          break;
+        }
+        case 'text': {
+          const content = serializeToText(items, options);
+          downloadFile(content, `cineflix-watchlist-${timestamp}.txt`, 'text/plain');
+          break;
+        }
+        case 'pdf': {
+          // For PDF generation, you would typically use a library like jsPDF.
+          // To preserve current behavior, export as text with .txt extension.
+          const content = serializeToText(items, options);
+          downloadFile(content, `cineflix-watchlist-${timestamp}.txt`, 'text/plain');
+          break;
+        }
+        default:
+          throw new Error('Unsupported export format');
+      }
+
+      onClose();
+    } catch (err: any) {
+      console.error('Export failed:', err);
+      // Provide simple user feedback on failure
+      try {
+        alert(`Export failed: ${err?.message || 'Unknown error'}`);
+      } catch {
+        // fall through if alert is not available
+      }
     }
-    
-    onClose();
   };
 
   const generateShareableLink = () => {
-    // In a real app, this would create a shareable link on your server
-    const listData = btoa(JSON.stringify(items.slice(0, 10))); // Limit for URL length
-    const link = `${window.location.origin}/shared-list?data=${listData}`;
-    setShareableLink(link);
+    try {
+      // In a real app, this would create a shareable link on your server
+      const listData = btoa(JSON.stringify(items.slice(0, 10))); // Limit for URL length
+      const link = `${window.location.origin}/shared-list?data=${listData}`;
+      setShareableLink(link);
+    } catch (err) {
+      console.error('Failed to generate shareable link:', err);
+      try {
+        alert('Failed to generate shareable link');
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const copyToClipboard = async () => {
@@ -194,6 +323,11 @@ const ExportModal: React.FC<ExportModalProps> = ({
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy to clipboard:', err);
+      try {
+        alert('Failed to copy link to clipboard');
+      } catch {
+        // ignore
+      }
     }
   };
 

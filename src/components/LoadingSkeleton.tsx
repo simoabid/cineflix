@@ -1,15 +1,21 @@
 import React from 'react';
 
 interface LoadingSkeletonProps {
-  type?: 'card' | 'carousel' | 'page' | 'hero';
+  type?: 'card' | 'carousel' | 'page' | 'hero' | 'spinner';
   count?: number;
   className?: string;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  showText?: boolean;
+  text?: string;
 }
 
-const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({ 
-  type = 'card', 
-  count = 1, 
-  className = '' 
+const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({
+  type = 'card',
+  count = 1,
+  className = '',
+  size = 'md',
+  showText = false,
+  text = 'Loading...'
 }) => {
   const renderCardSkeleton = () => (
     <div className="animate-pulse">
@@ -54,10 +60,10 @@ const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({
   );
 
   const renderPageSkeleton = () => (
-    <div className="min-h-screen bg-netflix-black">
+    <div className="min-h-screen bg-[#0A0A1F]">
       {/* Hero Skeleton */}
       {renderHeroSkeleton()}
-      
+
       {/* Content Sections */}
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-12">
         {Array.from({ length: 6 }).map((_, sectionIndex) => (
@@ -80,8 +86,47 @@ const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({
     </div>
   );
 
+  const renderSpinner = () => {
+    const sizeClasses = {
+      sm: 'h-8 w-8',
+      md: 'h-16 w-16',
+      lg: 'h-24 w-24',
+      xl: 'h-32 w-32'
+    };
+
+    return (
+      <div className="flex flex-col items-center justify-center gap-4">
+        <div className="relative">
+          {/* Main spinner with thick border */}
+          <div className={`${sizeClasses[size]} netflix-spinner-thick`} />
+
+          {/* Ripple effect */}
+          <div className={`${sizeClasses[size]} netflix-ripple`} />
+          <div
+            className={`${sizeClasses[size]} netflix-ripple`}
+            style={{ animationDelay: '0.5s' }}
+          />
+        </div>
+
+        {/* Loading text with dots animation */}
+        {showText && (
+          <div className="text-center space-y-2 loading-text">
+            <p className="text-white text-lg font-medium">{text}</p>
+            <div className="flex gap-2 justify-center">
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSkeleton = () => {
     switch (type) {
+      case 'spinner':
+        return renderSpinner();
       case 'card':
         return Array.from({ length: count }).map((_, index) => (
           <div key={index}>{renderCardSkeleton()}</div>

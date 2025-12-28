@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Movie } from '../types';
-import { 
-  getTrendingMovies, 
-  getPopularMovies, 
-  getTopRatedMovies, 
-  getNowPlayingMovies, 
+import {
+  getTrendingMovies,
+  getPopularMovies,
+  getTopRatedMovies,
+  getNowPlayingMovies,
   getUpcomingMovies,
   getMovieGenres,
   discoverMoviesByGenre,
@@ -14,7 +14,7 @@ import HeroCarousel from '../components/HeroCarousel';
 import ContentCarousel from '../components/ContentCarousel';
 import FilterBar from '../components/FilterBar';
 
-interface MoviesProps {}
+interface MoviesProps { }
 
 /**
  * Representation of a slide used by the hero carousel.
@@ -75,7 +75,7 @@ export const filterMoviesByCriteria = (
 
   const q = searchQuery.trim().toLowerCase();
   if (q) {
-    filtered = filtered.filter(m => 
+    filtered = filtered.filter(m =>
       (m.title || '').toLowerCase().includes(q) ||
       (m.overview || '').toLowerCase().includes(q)
     );
@@ -123,7 +123,7 @@ export const fetchHeroSlides = async (
 ): Promise<HeroSlide[]> => {
   const trending = await getTrendingFn(1);
   const featured = Array.isArray(trending?.results) ? trending.results.slice(0, limit) : [];
-  
+
   const heroData: HeroSlide[] = await Promise.all(
     featured.map(async (movie: any) => {
       try {
@@ -262,7 +262,7 @@ const Movies: React.FC<MoviesProps> = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Cache for genre data (used when fetching individual genre pages)
-  const genreCache = useMemo(() => new Map<number, Movie[]>(), []);
+  // const genreCache = useMemo(() => new Map<number, Movie[]>(), []);
 
   const fetchHero = useCallback(async () => {
     try {
@@ -356,15 +356,22 @@ const Movies: React.FC<MoviesProps> = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-red-600"></div>
+      <div className="min-h-screen bg-[#0A0A1F] flex items-center justify-center">
+        <div className="relative">
+          {/* Main thick spinner */}
+          <div className="h-32 w-32 netflix-spinner-thick" />
+
+          {/* Ripple effects */}
+          <div className="h-32 w-32 netflix-ripple" />
+          <div className="h-32 w-32 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-[#0A0A1F] flex items-center justify-center px-4">
         <div className="text-center">
           <p className="text-red-400 text-lg mb-4">{error}</p>
           <button
@@ -379,7 +386,7 @@ const Movies: React.FC<MoviesProps> = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-[#0A0A1F] text-white">
       {/* Hero Carousel */}
       {heroMovies.length > 0 && (
         <HeroCarousel
@@ -428,19 +435,19 @@ const Movies: React.FC<MoviesProps> = () => {
               items={trendingMovies}
               type="movie"
             />
-            
+
             <ContentCarousel
               title="Popular on CineFlix"
               items={popularMovies}
               type="movie"
             />
-            
+
             <ContentCarousel
               title="Top Rated"
               items={topRatedMovies}
               type="movie"
             />
-            
+
             <ContentCarousel
               title="Now Playing"
               items={nowPlayingMovies}

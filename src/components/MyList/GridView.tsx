@@ -3,15 +3,11 @@ import {
   Play, 
   MoreVertical, 
   Star, 
-  Clock, 
   Calendar, 
   Trash2, 
-  Edit3, 
   CheckSquare, 
   Square,
-  Flag,
   Tag,
-  Eye,
   EyeOff,
   Heart
 } from 'lucide-react';

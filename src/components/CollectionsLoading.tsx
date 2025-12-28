@@ -1,5 +1,18 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
 import React from 'react';
-import { Film, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 type Particle = {
   left: string;
@@ -200,9 +213,9 @@ const CollectionsLoading: React.FC<CollectionsLoadingProps> = ({
   const categorySkeletons = generateCategorySkeletons(categoriesCount, cardsPerCategory);
 
   return (
-    <div className="min-h-screen bg-netflix-black text-white">
+    <div className="min-h-screen bg-[#0A0A1F] text-white">
       {/* Hero Section Skeleton */}
-      <div className="relative h-[70vh] bg-gradient-to-br from-gray-800 via-gray-900 to-netflix-black overflow-hidden">
+      <div className="relative h-[70vh] bg-[#0A0A1F] overflow-hidden">
         {/* Animated background particles */}
         <div className="absolute inset-0">
           {particles.map((p, i) => (
@@ -222,7 +235,7 @@ const CollectionsLoading: React.FC<CollectionsLoadingProps> = ({
         </div>
 
         {/* Hero content skeleton */}
-        <div className="absolute inset-0 bg-gradient-to-t from-netflix-black via-netflix-black/50 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A1F] via-[#0A0A1F]/50 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 p-8 md:p-16">
           <div className="space-y-4">
             {/* Title skeleton with shimmer */}
@@ -259,17 +272,24 @@ const CollectionsLoading: React.FC<CollectionsLoadingProps> = ({
 
       {/* Main content area */}
       <div className="container mx-auto px-4 py-8">
-        {/* Loading indicator with film icon */}
+        {/* Enhanced Loading indicator */}
         <div className="flex items-center justify-center mb-12">
           <div className="relative">
-            <Film className="w-12 h-12 text-red-500 animate-spin" style={{ animationDuration: '3s' }} />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
-            </div>
+            {/* Main thick spinner */}
+            <div className="h-20 w-20 netflix-spinner-thick" />
+
+            {/* Ripple effects */}
+            <div className="h-20 w-20 netflix-ripple" />
+            <div className="h-20 w-20 netflix-ripple" style={{ animationDelay: '0.5s' }} />
           </div>
-          <div className="ml-4 space-y-2">
+          <div className="ml-6 space-y-2 loading-text">
             <div className="text-xl font-semibold text-white">Loading Collections</div>
             <div className="text-gray-400">Discovering amazing franchises...</div>
+            <div className="flex gap-2 mt-3">
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+            </div>
           </div>
         </div>
 

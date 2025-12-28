@@ -1,13 +1,12 @@
 import React from 'react';
-import { 
-  Grid, 
-  List, 
-  MoreHorizontal, 
-  BarChart3, 
-  Download, 
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown
+import {
+  Grid,
+  List,
+  MoreHorizontal,
+  BarChart3,
+  Download,
+
+  Search
 } from 'lucide-react';
 import { ViewMode, SortOption, SortDirection, ListStats } from '../../types/myList';
 
@@ -15,31 +14,28 @@ interface MyListHeaderProps {
   stats: ListStats;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  sortBy: SortOption;
-  sortDirection: SortDirection;
-  onSortChange: (sortBy: SortOption, direction?: SortDirection) => void;
+
   onStatsClick: () => void;
   onExportClick: () => void;
   selectedCount: number;
   totalCount: number;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
 }
 
 const MyListHeader: React.FC<MyListHeaderProps> = ({
   stats,
   viewMode,
   onViewModeChange,
-  sortBy,
-  sortDirection,
-  onSortChange,
+
   onStatsClick,
   onExportClick,
   selectedCount,
-  totalCount
+  totalCount,
+  searchQuery,
+  onSearchChange
 }) => {
-  const getSortIcon = (option: SortOption) => {
-    if (sortBy !== option) return <ArrowUpDown className="w-4 h-4" />;
-    return sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />;
-  };
+
 
   const formatHours = (hours: number) => {
     if (hours < 1) return `${Math.round(hours * 60)}m`;
@@ -50,12 +46,24 @@ const MyListHeader: React.FC<MyListHeaderProps> = ({
   };
 
   return (
-    <div className="mb-8">
+    <div className="mb-2">
       {/* Title and Stats */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">My List</h1>
-          <div className="flex flex-wrap gap-4 text-gray-400">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between mb-2 gap-4">
+        <div className="flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-2">
+            <h1 className="text-4xl font-bold text-white whitespace-nowrap">My List</h1>
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Search your list..."
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="w-full bg-gray-800/50 text-white pl-9 pr-4 py-2 rounded-full border border-gray-700/50 focus:border-netflix-red focus:outline-none focus:ring-1 focus:ring-netflix-red text-sm transition-all"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-4 text-gray-400 text-sm">
             <span>{stats.totalItems} items</span>
             <span>•</span>
             <span>{stats.totalMovies} movies</span>
@@ -73,7 +81,46 @@ const MyListHeader: React.FC<MyListHeaderProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-3 mt-4 lg:mt-0">
+        <div className="flex items-center gap-3 mt-1">
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 text-sm mr-2">View:</span>
+            <div className="flex bg-gray-800 rounded-lg p-1">
+              <button
+                onClick={() => onViewModeChange('grid')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${viewMode === 'grid'
+                  ? 'bg-netflix-red text-white'
+                  : 'text-gray-400 hover:text-white'
+                  }`}
+              >
+                <Grid className="w-4 h-4" />
+                <span className="hidden sm:inline">Grid</span>
+              </button>
+
+              <button
+                onClick={() => onViewModeChange('list')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${viewMode === 'list'
+                  ? 'bg-netflix-red text-white'
+                  : 'text-gray-400 hover:text-white'
+                  }`}
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">List</span>
+              </button>
+
+              <button
+                onClick={() => onViewModeChange('compact')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${viewMode === 'compact'
+                  ? 'bg-netflix-red text-white'
+                  : 'text-gray-400 hover:text-white'
+                  }`}
+              >
+                <MoreHorizontal className="w-4 h-4" />
+                <span className="hidden sm:inline">Compact</span>
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={onStatsClick}
             className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
@@ -81,7 +128,7 @@ const MyListHeader: React.FC<MyListHeaderProps> = ({
             <BarChart3 className="w-4 h-4" />
             <span className="hidden sm:inline">Stats</span>
           </button>
-          
+
           <button
             onClick={onExportClick}
             className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
@@ -101,105 +148,7 @@ const MyListHeader: React.FC<MyListHeaderProps> = ({
         </div>
       )}
 
-      {/* View Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        {/* View Mode Toggle */}
-        <div className="flex items-center gap-2">
-          <span className="text-gray-400 text-sm mr-2">View:</span>
-          <div className="flex bg-gray-800 rounded-lg p-1">
-            <button
-              onClick={() => onViewModeChange('grid')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${
-                viewMode === 'grid' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Grid className="w-4 h-4" />
-              <span className="hidden sm:inline">Grid</span>
-            </button>
-            
-            <button
-              onClick={() => onViewModeChange('list')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${
-                viewMode === 'list' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <List className="w-4 h-4" />
-              <span className="hidden sm:inline">List</span>
-            </button>
-            
-            <button
-              onClick={() => onViewModeChange('compact')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${
-                viewMode === 'compact' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <MoreHorizontal className="w-4 h-4" />
-              <span className="hidden sm:inline">Compact</span>
-            </button>
-          </div>
-        </div>
 
-        {/* Sort Controls */}
-        <div className="flex items-center gap-2">
-          <span className="text-gray-400 text-sm mr-2">Sort by:</span>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => onSortChange('dateAdded')}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                sortBy === 'dateAdded' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              Date Added
-              {getSortIcon('dateAdded')}
-            </button>
-            
-            <button
-              onClick={() => onSortChange('title')}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                sortBy === 'title' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              Title
-              {getSortIcon('title')}
-            </button>
-            
-            <button
-              onClick={() => onSortChange('rating')}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                sortBy === 'rating' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              Rating
-              {getSortIcon('rating')}
-            </button>
-            
-            <button
-              onClick={() => onSortChange('runtime')}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                sortBy === 'runtime' 
-                  ? 'bg-netflix-red text-white' 
-                  : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              <span className="hidden sm:inline">Runtime</span>
-              <span className="sm:hidden">Time</span>
-              {getSortIcon('runtime')}
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

@@ -1,29 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Grid, 
-  List, 
-  MoreHorizontal, 
-  Filter, 
-  Search, 
-  Plus, 
-  Download, 
-  BarChart3, 
-  Settings,
-  Play,
-  Clock,
-  Star,
-  Calendar,
-  Tag,
-  Trash2,
-  Edit3,
-  CheckSquare,
-  Square
-} from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+
 import { myListService } from '../services/myListService';
-import { MyListItem, ViewMode, FilterOptions, ListStats, SortOption, SortDirection } from '../types/myList';
+import { MyListItem, ViewMode, FilterOptions, SortOption, SortDirection, ListStats } from '../types/myList';
 import MyListHeader from '../components/MyList/MyListHeader';
 import FilterBar from '../components/MyList/FilterBar';
-import QuickActions from '../components/MyList/QuickActions';
+
 import ListContent from '../components/MyList/ListContent';
 import EmptyState from '../components/MyList/EmptyState';
 import BulkActions from '../components/MyList/BulkActions';
@@ -43,6 +24,8 @@ const MyListPage: React.FC = () => {
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<ListStats | null>(null);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
 
   // Filter state
   const [filters, setFilters] = useState<FilterOptions>({
@@ -59,86 +42,106 @@ const MyListPage: React.FC = () => {
   });
 
   // Load data on component mount
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  // Update filtered items when filters, sort, or search change
-  useEffect(() => {
-    applyFiltersAndSort();
-  }, [items, filters, sortBy, sortDirection, searchQuery]);
-
-  // Load user preferences
-  useEffect(() => {
-    const preferences = myListService.getPreferences();
-    setViewMode(preferences.defaultViewMode);
-    setSortBy(preferences.defaultSortOption);
-    setSortDirection(preferences.defaultSortDirection);
-  }, []);
-
-  const loadData = () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const myListItems = myListService.getMyList();
+      const [myListItems, statsData, tags] = await Promise.all([
+        myListService.getMyList(),
+        myListService.getListStats(),
+        myListService.getAllTags()
+      ]);
       setItems(myListItems);
+      setFilteredItems(myListItems);
+      setStats(statsData);
+      setAvailableTags(tags);
     } catch (error) {
       console.error('Error loading My List:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const applyFiltersAndSort = () => {
-    let result = myListService.getFilteredItems(filters, sortBy, sortDirection);
-    
-    if (searchQuery.trim()) {
-      result = myListService.searchItems(searchQuery);
-      // Apply filters to search results
-      result = result.filter(item => {
-        if (filters.contentType !== 'all' && item.contentType !== filters.contentType) return false;
-        if (filters.status !== 'all' && item.status !== filters.status) return false;
-        if (filters.priority !== 'all' && item.priority !== filters.priority) return false;
-        return true;
-      });
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Load user preferences
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const preferences = await myListService.getPreferences();
+        setViewMode(preferences.defaultViewMode);
+        setSortBy(preferences.defaultSortOption);
+        setSortDirection(preferences.defaultSortDirection);
+      } catch (error) {
+        console.error('Error loading preferences:', error);
+      }
+    };
+    loadPreferences();
+  }, []);
+
+  // Update filtered items when filters, sort, or search change
+  useEffect(() => {
+    const applyFiltersAndSort = async () => {
+      try {
+        let result: MyListItem[];
+
+        if (searchQuery.trim()) {
+          result = await myListService.searchItems(searchQuery);
+          // Apply filters to search results
+          result = result.filter(item => {
+            if (filters.contentType !== 'all' && item.contentType !== filters.contentType) return false;
+            if (filters.status !== 'all' && item.status !== filters.status) return false;
+            if (filters.priority !== 'all' && item.priority !== filters.priority) return false;
+            return true;
+          });
+        } else {
+          result = await myListService.getFilteredItems(filters, sortBy, sortDirection);
+        }
+
+        setFilteredItems(result);
+      } catch (error) {
+        console.error('Error filtering items:', error);
+        setFilteredItems([]);
+      }
+    };
+
+    if (items.length > 0) {
+      applyFiltersAndSort();
     }
-    
-    setFilteredItems(result);
-  };
-
-  // Calculate stats
-  const stats = useMemo(() => {
-    return myListService.getListStats();
-  }, [items]);
-
-  // Continue watching items
-  const continueWatchingItems = useMemo(() => {
-    return myListService.getContinueWatching();
-  }, [items]);
-
-  // Recently added items
-  const recentlyAddedItems = useMemo(() => {
-    return myListService.getRecentlyAdded();
-  }, [items]);
+  }, [items, filters, sortBy, sortDirection, searchQuery]);
 
   // Handle item updates
-  const handleUpdateItem = (itemId: string, updates: Partial<MyListItem>) => {
-    myListService.updateItem(itemId, updates);
-    loadData();
+  const handleUpdateItem = async (itemId: string, updates: Partial<MyListItem>) => {
+    try {
+      await myListService.updateItem(itemId, updates);
+      await loadData();
+    } catch (error) {
+      console.error('Error updating item:', error);
+    }
   };
 
   // Handle item removal
-  const handleRemoveItem = (itemId: string) => {
-    myListService.removeFromList(itemId);
-    loadData();
-    setSelectedItems(prev => prev.filter(id => id !== itemId));
+  const handleRemoveItem = async (itemId: string) => {
+    try {
+      await myListService.removeFromList(itemId);
+      await loadData();
+      setSelectedItems(prev => prev.filter(id => id !== itemId));
+    } catch (error) {
+      console.error('Error removing item:', error);
+    }
   };
 
   // Handle bulk operations
-  const handleBulkOperation = (operation: any) => {
-    myListService.performBulkOperation(operation);
-    loadData();
-    setSelectedItems([]);
-    setShowBulkActions(false);
+  const handleBulkOperation = async (operation: any) => {
+    try {
+      await myListService.performBulkOperation(operation);
+      await loadData();
+      setSelectedItems([]);
+      setShowBulkActions(false);
+    } catch (error) {
+      console.error('Error performing bulk operation:', error);
+    }
   };
 
   // Handle item selection
@@ -175,11 +178,14 @@ const MyListPage: React.FC = () => {
   };
 
   // Handle view mode change
-  const handleViewModeChange = (newViewMode: ViewMode) => {
+  const handleViewModeChange = async (newViewMode: ViewMode) => {
     setViewMode(newViewMode);
-    // Save preference
-    const preferences = myListService.getPreferences();
-    myListService.savePreferences({ ...preferences, defaultViewMode: newViewMode });
+    try {
+      const preferences = await myListService.getPreferences();
+      await myListService.savePreferences({ ...preferences, defaultViewMode: newViewMode });
+    } catch (error) {
+      console.error('Error saving preference:', error);
+    }
   };
 
   // Show bulk actions when items are selected
@@ -189,62 +195,62 @@ const MyListPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-netflix-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-netflix-red mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading your list...</p>
+      <div className="min-h-screen bg-[#0A0A1F] text-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="h-20 w-20 netflix-spinner-thick" />
+            <div className="h-20 w-20 netflix-ripple" />
+            <div className="h-20 w-20 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+          </div>
+          <div className="text-center loading-text">
+            <p className="text-white text-lg font-medium mb-2">Loading your list...</p>
+            <div className="flex gap-2 justify-center">
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+              <div className="netflix-dot" />
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-netflix-black text-white pt-20">
+    <div className="min-h-screen bg-[#0A0A1F] text-white pt-20">
       <div className="container mx-auto px-4 py-8">
-        {/* Header */}
+        {/* Header - now containing search */}
         <MyListHeader
-          stats={stats}
+          stats={stats || { totalItems: 0, totalMovies: 0, totalTVShows: 0, totalHours: 0, completionRate: 0, averageRating: 0, genreDistribution: {}, statusDistribution: { notStarted: 0, inProgress: 0, completed: 0, dropped: 0 }, monthlyAdditions: {} }}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
-          sortBy={sortBy}
-          sortDirection={sortDirection}
-          onSortChange={handleSortChange}
+
           onStatsClick={() => setShowStatsModal(true)}
           onExportClick={() => setShowExportModal(true)}
           selectedCount={selectedItems.length}
           totalCount={filteredItems.length}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
         />
-
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Search your list..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-gray-800 text-white pl-10 pr-4 py-3 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none focus:ring-1 focus:ring-netflix-red"
-            />
-          </div>
-        </div>
 
         {/* Filter Bar */}
         <FilterBar
           filters={filters}
           onFilterChange={handleFilterChange}
-          availableTags={myListService.getAllTags()}
+          availableTags={availableTags}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          onSortChange={handleSortChange}
         />
 
         {/* Quick Actions Section */}
-        {(continueWatchingItems.length > 0 || recentlyAddedItems.length > 0) && (
+        {/* {(continueWatchingItems.length > 0 || recentlyAddedItems.length > 0) && (
           <QuickActions
             continueWatching={continueWatchingItems}
             recentlyAdded={recentlyAddedItems}
             onItemUpdate={handleUpdateItem}
             onItemRemove={handleRemoveItem}
           />
-        )}
+        )} */}
 
         {/* Bulk Actions */}
         {showBulkActions && (
@@ -290,7 +296,7 @@ const MyListPage: React.FC = () => {
         )}
 
         {/* Modals */}
-        {showStatsModal && (
+        {showStatsModal && stats && (
           <StatsModal
             stats={stats}
             items={items}
@@ -300,7 +306,7 @@ const MyListPage: React.FC = () => {
 
         {showExportModal && (
           <ExportModal
-            items={selectedItems.length > 0 
+            items={selectedItems.length > 0
               ? filteredItems.filter(item => selectedItems.includes(item.id))
               : filteredItems
             }

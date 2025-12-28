@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CollectionDetails, CollectionCategory, FranchiseFilter } from '../types';
-import { 
+import {
   discoverAllCollections,
   getCollectionsByCategory,
   getCollectionStats,
@@ -45,7 +45,7 @@ const CollectionsPage: React.FC = () => {
   const [infiniteCollections, setInfiniteCollections] = useState<CollectionDetails[]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreCollections, setHasMoreCollections] = useState(true);
-  const [heroRotationInterval, setHeroRotationInterval] = useState<NodeJS.Timeout | null>(null);
+  const [heroRotationInterval, setHeroRotationInterval] = useState<number | null>(null);
   const [isHeroRotating, setIsHeroRotating] = useState(false);
 
   useEffect(() => {
@@ -71,52 +71,52 @@ const CollectionsPage: React.FC = () => {
       setInitialLoading(true);
       // Don't clear cache on initial load - use cached data if available
     }
-    
+
     setError(null);
     setDiscoveryProgress({ scanned: 0, found: 0, step: forceRefresh ? 'Starting fresh discovery...' : 'Loading collections...' });
-    
+
     try {
       console.log(`🚀 ${forceRefresh ? 'Refreshing' : 'Loading'} collections from TMDB...`);
-      
+
       // Progress callback to update UI in real-time
       const progressCallback = (progress: { scanned: number; found: number; step: string }) => {
         setDiscoveryProgress(progress);
       };
-      
+
       // Use cached data on initial load, force refresh only when requested
       const discoveredCollections = await discoverAllCollections(200, forceRefresh, progressCallback);
-      
+
       if (discoveredCollections.length === 0) {
         throw new Error('No collections discovered from TMDB. Please check your internet connection and try again.');
       }
-      
-      setDiscoveryProgress({ 
-        scanned: discoveredCollections.length, 
-        found: discoveredCollections.length, 
-        step: 'Processing collections...' 
+
+      setDiscoveryProgress({
+        scanned: discoveredCollections.length,
+        found: discoveredCollections.length,
+        step: 'Processing collections...'
       });
-      
+
       // Enhance with user progress
       const enhancedCollections = CollectionsService.enhanceCollectionsWithProgress(discoveredCollections);
-      
+
       setAllCollections(enhancedCollections);
       setCollections(enhancedCollections);
-      
+
       // Set random featured collection on initial load
       setRandomFeaturedCollection(enhancedCollections);
-      
+
       // Start hero rotation interval
       startHeroRotation(enhancedCollections);
-      
-      setDiscoveryProgress({ 
-        scanned: enhancedCollections.length, 
-        found: enhancedCollections.length, 
-        step: 'Organizing categories...' 
+
+      setDiscoveryProgress({
+        scanned: enhancedCollections.length,
+        found: enhancedCollections.length,
+        step: 'Organizing categories...'
       });
-      
+
       // Organize into dynamic categories
       await organizeDynamicCategories(enhancedCollections);
-      
+
       // Fetch collection statistics (non-blocking)
       try {
         const collectionStats = await getCollectionStats();
@@ -124,24 +124,24 @@ const CollectionsPage: React.FC = () => {
       } catch (statsError) {
         console.warn('Failed to load stats:', statsError);
       }
-      
-      setDiscoveryProgress({ 
-        scanned: enhancedCollections.length, 
-        found: enhancedCollections.length, 
-        step: `✅ Complete! Found ${enhancedCollections.length} collections` 
+
+      setDiscoveryProgress({
+        scanned: enhancedCollections.length,
+        found: enhancedCollections.length,
+        step: `✅ Complete! Found ${enhancedCollections.length} collections`
       });
-      
+
       console.log(`🎉 Successfully discovered and loaded ${enhancedCollections.length} collections from TMDB!`);
-      
+
     } catch (error: any) {
       console.error('❌ Error in comprehensive collection discovery:', error);
       const errorMessage = error?.message || 'Failed to discover collections from TMDB. Please try again.';
       setError(errorMessage);
-      
-      setDiscoveryProgress({ 
-        scanned: 0, 
-        found: 0, 
-        step: `❌ Error: ${errorMessage}` 
+
+      setDiscoveryProgress({
+        scanned: 0,
+        found: 0,
+        step: `❌ Error: ${errorMessage}`
       });
     } finally {
       setLoading(false);
@@ -153,7 +153,7 @@ const CollectionsPage: React.FC = () => {
   const organizeDynamicCategories = async (collections: CollectionDetails[]) => {
     const continueWatching = CollectionsService.getContinueWatching(collections);
     const recommended = CollectionsService.getRecommendedCollections(collections);
-    
+
     // Use the new category-based fetching for better organization
     const categoryPromises = [
       { id: 'popular', name: 'Popular Franchises', key: 'popular' },
@@ -172,9 +172,9 @@ const CollectionsPage: React.FC = () => {
         icon: getCategoryIcon(cat.id)
       };
     });
-    
+
     const dynamicCategories = await Promise.all(categoryPromises);
-    
+
     // Add special categories that use local data
     const specialCategories: CollectionCategory[] = [
       {
@@ -196,7 +196,7 @@ const CollectionsPage: React.FC = () => {
         name: 'Recently Updated',
         description: 'Franchises with new releases',
         collections: collections.filter(c => {
-          const latestYear = Math.max(...c.parts.map(film => 
+          const latestYear = Math.max(...c.parts.map(film =>
             new Date(film.release_date || '').getFullYear()
           ));
           return latestYear >= new Date().getFullYear() - 2;
@@ -207,9 +207,9 @@ const CollectionsPage: React.FC = () => {
         id: 'scifi',
         name: 'Sci-Fi Universes',
         description: 'Space operas and futuristic franchises',
-        collections: collections.filter(c => 
+        collections: collections.filter(c =>
           c.genre_categories.includes('Science Fiction') ||
-          ['Star Wars', 'Star Trek', 'Matrix', 'Alien', 'Terminator'].some(keyword => 
+          ['Star Wars', 'Star Trek', 'Matrix', 'Alien', 'Terminator'].some(keyword =>
             c.name.includes(keyword)
           )
         ).slice(0, 8),
@@ -219,23 +219,23 @@ const CollectionsPage: React.FC = () => {
         id: 'fantasy',
         name: 'Fantasy Epics',
         description: 'Magical worlds and adventures',
-        collections: collections.filter(c => 
+        collections: collections.filter(c =>
           c.genre_categories.includes('Fantasy') ||
-          ['Lord of the Rings', 'Harry Potter', 'Chronicles', 'Hobbit'].some(keyword => 
+          ['Lord of the Rings', 'Harry Potter', 'Chronicles', 'Hobbit'].some(keyword =>
             c.name.includes(keyword)
           )
         ).slice(0, 8),
         icon: 'wand'
       }
     ];
-    
+
     // Combine all categories and filter out empty ones
     const allCategories = [...specialCategories, ...dynamicCategories]
       .filter(category => category.collections.length > 0);
-    
+
     setCategories(allCategories);
   };
-  
+
   const getCategoryDescription = (categoryId: string): string => {
     const descriptions: { [key: string]: string } = {
       popular: 'Most-watched series on the platform',
@@ -247,7 +247,7 @@ const CollectionsPage: React.FC = () => {
     };
     return descriptions[categoryId] || 'Great movie collections';
   };
-  
+
   const getCategoryIcon = (categoryId: string): string => {
     const icons: { [key: string]: string } = {
       popular: 'crown',
@@ -281,7 +281,7 @@ const CollectionsPage: React.FC = () => {
       const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
       const windowHeight = window.innerHeight;
       const documentHeight = document.documentElement.offsetHeight;
-      
+
       // Load more when user is 800px from bottom (more aggressive)
       if (scrollTop + windowHeight >= documentHeight - 800) {
         if (!isLoadingMore && hasMoreCollections) {
@@ -297,27 +297,27 @@ const CollectionsPage: React.FC = () => {
   // Load more collections for infinite scroll
   const loadMoreCollections = async () => {
     if (isLoadingMore || !hasMoreCollections) return;
-    
+
     setIsLoadingMore(true);
-    
+
     try {
       console.log('📄 Loading more collections...');
       const { collections: newCollections, hasMore } = await getNextCollectionsBatch(20);
-      
+
       if (newCollections.length > 0) {
         // Enhance with user progress
         const enhancedCollections = CollectionsService.enhanceCollectionsWithProgress(newCollections);
         setInfiniteCollections(prev => [...prev, ...enhancedCollections]);
         console.log(`✅ Loaded ${newCollections.length} more collections`);
       }
-      
+
       // Always assume there are more collections unless we've had multiple failed attempts
       if (newCollections.length === 0) {
         // If no collections loaded, still keep hasMore true for retry
         console.log('⚠️ No new collections in this batch, but keeping infinite scroll active');
       }
       setHasMoreCollections(hasMore);
-      
+
     } catch (error) {
       console.error('❌ Error loading more collections:', error);
       // Don't disable infinite scroll on error - let user try again
@@ -332,11 +332,11 @@ const CollectionsPage: React.FC = () => {
     setIsAllCollectionsView(true);
     setLoading(true);
     setError(null);
-    
+
     try {
       // Check if we have cached collections
       const cachedCollections = getCachedCollections();
-      
+
       if (cachedCollections.length > 0) {
         console.log(`📦 Using ${cachedCollections.length} cached collections`);
         const enhancedCollections = CollectionsService.enhanceCollectionsWithProgress(cachedCollections);
@@ -345,7 +345,7 @@ const CollectionsPage: React.FC = () => {
         // Load initial batch
         console.log('🚀 Loading initial collections batch...');
         const { collections: initialCollections, hasMore } = await getNextCollectionsBatch(20);
-        
+
         if (initialCollections.length > 0) {
           const enhancedCollections = CollectionsService.enhanceCollectionsWithProgress(initialCollections);
           setInfiniteCollections(enhancedCollections);
@@ -375,7 +375,7 @@ const CollectionsPage: React.FC = () => {
       setIsSearching(true);
       try {
         console.log(`🔍 Searching for: "${query}"`);
-        
+
         // Use local search first (faster and doesn't hit API)
         const localResults = allCollections.filter(collection => {
           const searchableText = [
@@ -386,63 +386,63 @@ const CollectionsPage: React.FC = () => {
             collection.status,
             ...collection.parts.map(movie => movie.title)
           ].join(' ').toLowerCase();
-          
+
           const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 1);
           return searchTerms.some(term => searchableText.includes(term));
         });
-        
+
         // Apply active filters to search results
         let filteredResults = localResults;
-        
+
         if (activeFilter.length === 'trilogy') {
           filteredResults = filteredResults.filter(c => c.film_count === 3);
         } else if (activeFilter.length === 'extended') {
           filteredResults = filteredResults.filter(c => c.film_count >= 5);
         }
-        
+
         if (activeFilter.genre && activeFilter.genre.length > 0) {
-          filteredResults = filteredResults.filter(c => 
+          filteredResults = filteredResults.filter(c =>
             activeFilter.genre!.some(genre => c.genre_categories.includes(genre))
           );
         }
-        
+
         if (activeFilter.status && activeFilter.status.length > 0) {
           filteredResults = filteredResults.filter(c => activeFilter.status!.includes(c.status));
         }
-        
+
         if (activeFilter.type && activeFilter.type.length > 0) {
           filteredResults = filteredResults.filter(c => activeFilter.type!.includes(c.type));
         }
-        
+
         // Sort results by relevance
         const scoredResults = filteredResults.map(collection => {
           let score = 0;
           const lowerQuery = query.toLowerCase();
           const lowerName = collection.name.toLowerCase();
-          
+
           // Exact name match gets highest score
           if (lowerName === lowerQuery) score += 100;
           // Name starts with query gets high score  
           else if (lowerName.startsWith(lowerQuery)) score += 50;
           // Name contains query gets medium score
           else if (lowerName.includes(lowerQuery)) score += 25;
-          
+
           // Boost popular collections
           score += Math.min(collection.film_count * 2, 20);
-          
+
           return { collection, score };
         }).sort((a, b) => b.score - a.score);
-        
+
         const finalResults = scoredResults.map(item => item.collection);
-        
+
         console.log(`✅ Found ${finalResults.length} matching collections`);
         setCollections(finalResults);
-        
+
         // Show search results feedback with suggestions
         if (finalResults.length === 0 && query.length > 2) {
           console.log(`💡 Try searching for: Marvel, Batman, Harry Potter, Star Wars, Disney, Pixar, Horror, Animation`);
         }
-        
+
       } catch (error) {
         console.error('Search error:', error);
         setCollections([]);
@@ -460,17 +460,17 @@ const CollectionsPage: React.FC = () => {
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     setCurrentPage(1);
-    
+
     // Clear previous timeout
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
-    
+
     // Set new timeout for debounced search
     const newTimeout = window.setTimeout(() => {
       performSearch(query);
     }, 300); // 300ms delay
-    
+
     setSearchTimeout(newTimeout);
   };
 
@@ -535,17 +535,17 @@ const CollectionsPage: React.FC = () => {
   // Helper function to select a random featured collection
   const setRandomFeaturedCollection = (collections: CollectionDetails[]) => {
     if (collections.length === 0) return;
-    
+
     // Prioritize popular franchises for better selection
-    const popularCollections = collections.filter(c => 
+    const popularCollections = collections.filter(c =>
       ['Marvel', 'Star Wars', 'Harry Potter', 'Lord of the Rings', 'Avengers', 'Spider-Man', 'Fast', 'Furious', 'Transformers', 'Pirates', 'Jurassic', 'Mission', 'John Wick', 'Batman', 'Superman', 'X-Men', 'Terminator', 'Alien', 'Predator', 'Indiana Jones'].some(keyword =>
         c.name.toLowerCase().includes(keyword.toLowerCase())
       )
     );
-    
+
     // If we have popular collections, use them with higher probability
     const candidateCollections = popularCollections.length >= 5 ? popularCollections : collections;
-    
+
     // Select random collection, but avoid selecting the same one if possible
     let randomCollection;
     if (candidateCollections.length > 1 && featuredCollection) {
@@ -554,7 +554,7 @@ const CollectionsPage: React.FC = () => {
     } else {
       randomCollection = candidateCollections[Math.floor(Math.random() * candidateCollections.length)];
     }
-    
+
     setFeaturedCollection(randomCollection);
   };
 
@@ -564,12 +564,12 @@ const CollectionsPage: React.FC = () => {
     if (heroRotationInterval) {
       clearInterval(heroRotationInterval);
     }
-    
+
     // Start new rotation interval (5 seconds)
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       setRandomFeaturedCollection(collections);
     }, 5000);
-    
+
     setHeroRotationInterval(interval);
     setIsHeroRotating(true);
   };
@@ -584,11 +584,7 @@ const CollectionsPage: React.FC = () => {
   };
 
   // Restart hero rotation after user interaction
-  const restartHeroRotation = () => {
-    if (allCollections.length > 0) {
-      startHeroRotation(allCollections);
-    }
-  };
+  // removed unused restartHeroRotation
 
   const renderCategoryIcon = (iconName: string) => {
     switch (iconName) {
@@ -611,12 +607,12 @@ const CollectionsPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-[#0A0A1F] text-white">
       {/* Hero Section */}
       {featuredCollection && (
         <div className="relative">
-          <CollectionsHero 
-            collection={featuredCollection} 
+          <CollectionsHero
+            collection={featuredCollection}
             onStartMarathon={() => {
               stopHeroRotation();
               handleCollectionClick(featuredCollection);
@@ -627,7 +623,7 @@ const CollectionsPage: React.FC = () => {
             }}
             onHeroInteraction={stopHeroRotation}
           />
-          
+
           {/* Rotation Controls */}
           <div className="absolute top-6 right-6 z-10 flex items-center space-x-3">
             {/* Manual Next Button */}
@@ -638,7 +634,7 @@ const CollectionsPage: React.FC = () => {
             >
               <ChevronRight className="w-5 h-5 text-white group-hover:text-netflix-red transition-colors" />
             </button>
-            
+
             {/* Rotation Indicator */}
             {isHeroRotating && (
               <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-2 flex items-center space-x-2">
@@ -675,7 +671,7 @@ const CollectionsPage: React.FC = () => {
               )}
             </div>
           </div>
-          
+
           {/* Enhanced Stats */}
           <div className="mt-4 lg:mt-0 flex items-center flex-wrap gap-4 text-sm text-gray-400">
             <div className="text-center bg-gray-800/50 rounded-lg px-4 py-2 min-w-20">
@@ -708,9 +704,8 @@ const CollectionsPage: React.FC = () => {
           {/* Enhanced Search */}
           <div className="relative flex-1">
             <div className="relative">
-              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors ${
-                isSearching ? 'text-red-400 animate-pulse' : 'text-gray-400'
-              }`} />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors ${isSearching ? 'text-red-400 animate-pulse' : 'text-gray-400'
+                }`} />
               <input
                 type="text"
                 placeholder="Search collections, movies, characters, genres, keywords..."
@@ -721,7 +716,7 @@ const CollectionsPage: React.FC = () => {
               {/* Search activity indicator */}
               {isSearching && (
                 <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-4 h-4 netflix-spinner" />
                 </div>
               )}
               {/* Clear button */}
@@ -736,7 +731,7 @@ const CollectionsPage: React.FC = () => {
                 </button>
               )}
             </div>
-            
+
             {/* Search suggestions */}
             {searchQuery.length > 0 && searchQuery.length < 3 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-gray-900/95 backdrop-blur-sm border border-gray-700 rounded-lg p-3 z-10">
@@ -760,9 +755,8 @@ const CollectionsPage: React.FC = () => {
           <button
             onClick={() => fetchCollections(true)}
             disabled={isRefreshing || initialLoading}
-            className={`px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 border border-red-500 rounded-lg text-white hover:from-red-700 hover:to-red-800 transition-all flex items-center space-x-2 ${
-              isRefreshing || initialLoading ? 'opacity-50 cursor-not-allowed' : 'shadow-lg hover:shadow-red-500/25'
-            }`}
+            className={`px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 border border-red-500 rounded-lg text-white hover:from-red-700 hover:to-red-800 transition-all flex items-center space-x-2 ${isRefreshing || initialLoading ? 'opacity-50 cursor-not-allowed' : 'shadow-lg hover:shadow-red-500/25'
+              }`}
             title="Clear cache and discover fresh collections from TMDB"
           >
             <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -775,24 +769,22 @@ const CollectionsPage: React.FC = () => {
           <div className="flex bg-gray-900 rounded-lg p-1">
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-md transition-colors ${
-                viewMode === 'grid' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
             >
               <Grid className="w-5 h-5" />
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded-md transition-colors ${
-                viewMode === 'list' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
             >
               <List className="w-5 h-5" />
             </button>
           </div>
 
           {/* Filter Button */}
-          <CollectionsFilter 
+          <CollectionsFilter
             onFilterChange={setActiveFilter}
             collections={collections}
           />
@@ -805,21 +797,19 @@ const CollectionsPage: React.FC = () => {
               setSelectedCategory('all');
               exitAllCollectionsView();
             }}
-            className={`px-4 py-2 rounded-full text-sm transition-colors ${
-              selectedCategory === 'all' && !isAllCollectionsView
-                ? 'bg-red-600 text-white' 
+            className={`px-4 py-2 rounded-full text-sm transition-colors ${selectedCategory === 'all' && !isAllCollectionsView
+                ? 'bg-red-600 text-white'
                 : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-            }`}
+              }`}
           >
             All Categories
           </button>
           <button
             onClick={initializeAllCollectionsView}
-            className={`px-4 py-2 rounded-full text-sm transition-colors flex items-center space-x-2 ${
-              isAllCollectionsView
-                ? 'bg-red-600 text-white' 
+            className={`px-4 py-2 rounded-full text-sm transition-colors flex items-center space-x-2 ${isAllCollectionsView
+                ? 'bg-red-600 text-white'
                 : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-            }`}
+              }`}
           >
             <span>🔄</span>
             <span>All Collections</span>
@@ -833,11 +823,10 @@ const CollectionsPage: React.FC = () => {
             <button
               key={category.id}
               onClick={() => setSelectedCategory(category.id)}
-              className={`px-4 py-2 rounded-full text-sm transition-colors flex items-center space-x-2 ${
-                selectedCategory === category.id
-                  ? 'bg-red-600 text-white' 
+              className={`px-4 py-2 rounded-full text-sm transition-colors flex items-center space-x-2 ${selectedCategory === category.id
+                  ? 'bg-red-600 text-white'
                   : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-              }`}
+                }`}
             >
               {category.icon && renderCategoryIcon(category.icon)}
               <span>{category.name}</span>
@@ -876,7 +865,7 @@ const CollectionsPage: React.FC = () => {
                 </button>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {infiniteCollections.map((collection) => (
                 <FranchiseCard
@@ -886,17 +875,19 @@ const CollectionsPage: React.FC = () => {
                 />
               ))}
             </div>
-            
+
             {/* Loading more indicator */}
             {isLoadingMore && (
               <div className="flex justify-center items-center py-8">
                 <div className="flex items-center space-x-3">
-                  <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-gray-400">Loading more collections...</span>
+                  <div className="relative">
+                    <div className="w-8 h-8 netflix-spinner-thick" />
+                  </div>
+                  <span className="text-gray-400 loading-text">Loading more collections...</span>
                 </div>
               </div>
             )}
-            
+
             {/* Keep scrolling hint */}
             {!isLoadingMore && infiniteCollections.length > 0 && (
               <div className="text-center py-8">
@@ -926,14 +917,14 @@ const CollectionsPage: React.FC = () => {
                       <p className="text-gray-400">{category.description}</p>
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={() => setSelectedCategory(category.id)}
                     className="text-red-400 hover:text-red-300 text-sm font-medium"
                   >
                     View All →
                   </button>
                 </div>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                   {category.collections.slice(0, 4).map((collection) => (
                     <FranchiseCard
@@ -958,7 +949,7 @@ const CollectionsPage: React.FC = () => {
                   ({filteredCollections.length} collections)
                 </span>
               </div>
-              
+
               {/* Advanced Stats */}
               {stats && (
                 <div className="hidden lg:flex items-center space-x-6 text-sm text-gray-400">
@@ -979,11 +970,10 @@ const CollectionsPage: React.FC = () => {
             </div>
 
             {/* Show paginated collections */}
-            <div className={`${
-              viewMode === 'grid' 
-                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6' 
+            <div className={`${viewMode === 'grid'
+                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
                 : 'space-y-4'
-            }`}>
+              }`}>
               {paginatedCollections.map((collection) => (
                 <FranchiseCard
                   key={collection.id}
@@ -999,11 +989,10 @@ const CollectionsPage: React.FC = () => {
                 <button
                   onClick={() => handlePageChange(currentPage - 1)}
                   disabled={currentPage === 1}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                    currentPage === 1
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${currentPage === 1
                       ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                       : 'bg-gray-800 text-white hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>Previous</span>
@@ -1027,11 +1016,10 @@ const CollectionsPage: React.FC = () => {
                       <button
                         key={pageNum}
                         onClick={() => handlePageChange(pageNum)}
-                        className={`w-10 h-10 rounded-lg transition-colors ${
-                          currentPage === pageNum
+                        className={`w-10 h-10 rounded-lg transition-colors ${currentPage === pageNum
                             ? 'bg-red-600 text-white'
                             : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                        }`}
+                          }`}
                       >
                         {pageNum}
                       </button>
@@ -1042,11 +1030,10 @@ const CollectionsPage: React.FC = () => {
                 <button
                   onClick={() => handlePageChange(currentPage + 1)}
                   disabled={currentPage === totalPages}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                    currentPage === totalPages
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${currentPage === totalPages
                       ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                       : 'bg-gray-800 text-white hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   <span>Next</span>
                   <ChevronRight className="w-4 h-4" />
@@ -1062,13 +1049,13 @@ const CollectionsPage: React.FC = () => {
             <div className="text-gray-500 text-6xl mb-4">🎬</div>
             <h3 className="text-xl font-semibold text-gray-300 mb-2">No collections found</h3>
             <p className="text-gray-500 mb-4">
-              {searchQuery 
+              {searchQuery
                 ? `No collections match "${searchQuery}". Try a different search term or clear filters.`
                 : 'Try adjusting your filters to find the perfect franchise to binge.'
               }
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <button 
+              <button
                 onClick={() => {
                   setSearchQuery('');
                   setActiveFilter({});
@@ -1080,7 +1067,7 @@ const CollectionsPage: React.FC = () => {
               >
                 Clear All Filters
               </button>
-              <button 
+              <button
                 onClick={() => fetchCollections(true)}
                 className="px-6 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2"
               >
@@ -1088,7 +1075,7 @@ const CollectionsPage: React.FC = () => {
                 <span>Refresh Collections</span>
               </button>
             </div>
-            
+
             {/* Additional help text */}
             <div className="mt-8 text-sm text-gray-400">
               <p>💡 <strong>Tip:</strong> We discover collections dynamically from TMDB.</p>
@@ -1100,18 +1087,22 @@ const CollectionsPage: React.FC = () => {
         {/* Enhanced Loading State with Progress */}
         {initialLoading && !error && (
           <div className="text-center py-16 max-w-2xl mx-auto">
-            <div className="relative mb-8">
-              <div className="animate-spin rounded-full h-20 w-20 border-b-4 border-red-600 mx-auto mb-4"></div>
+            <div className="relative mb-8 flex justify-center">
+              <div className="relative">
+                <div className="h-20 w-20 netflix-spinner-thick" />
+                <div className="h-20 w-20 netflix-ripple" />
+                <div className="h-20 w-20 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+              </div>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-red-600 font-bold text-lg">{discoveryProgress.found}</span>
+                <span className="text-netflix-red font-bold text-lg z-10">{discoveryProgress.found}</span>
               </div>
             </div>
-            
+
             <h3 className="text-2xl font-bold text-white mb-3">🚀 Lightning-Fast Discovery</h3>
             <p className="text-red-400 font-medium mb-4 text-lg">
               {discoveryProgress.step}
             </p>
-            
+
             {/* Progress Stats */}
             <div className="grid grid-cols-2 gap-6 mb-6 text-center">
               <div className="bg-gray-800/50 rounded-lg p-4">
@@ -1123,7 +1114,7 @@ const CollectionsPage: React.FC = () => {
                 <div className="text-sm text-gray-400">Collections Found</div>
               </div>
             </div>
-            
+
             {/* Discovery Info */}
             <div className="bg-gray-800/30 rounded-lg p-6 text-left">
               <h4 className="text-lg font-semibold text-white mb-3">🚀 Lightning-Fast Discovery:</h4>
@@ -1149,17 +1140,16 @@ const CollectionsPage: React.FC = () => {
               {error}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <button 
+              <button
                 onClick={() => fetchCollections(true)}
                 disabled={isRefreshing}
-                className={`px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 ${
-                  isRefreshing ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+                className={`px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
               >
                 <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                 <span>{isRefreshing ? 'Retrying...' : 'Try Again'}</span>
               </button>
-              <button 
+              <button
                 onClick={() => {
                   setError(null);
                   setSearchQuery('');
@@ -1170,7 +1160,7 @@ const CollectionsPage: React.FC = () => {
                 Clear Error
               </button>
             </div>
-            
+
             {/* Troubleshooting tips */}
             <div className="mt-8 text-sm text-gray-400 max-w-lg mx-auto">
               <p className="mb-2"><strong>Troubleshooting:</strong></p>

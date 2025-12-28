@@ -640,7 +640,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         {/* Loading Spinner */}
         {playerState.loading && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-[#ff0000] border-t-transparent"></div>
+            <div className="relative">
+              <div className="h-20 w-20 netflix-spinner-thick" />
+              <div className="h-20 w-20 netflix-ripple" />
+              <div className="h-20 w-20 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+            </div>
           </div>
         )}
 

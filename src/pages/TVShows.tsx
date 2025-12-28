@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { TVShow, Genre } from '../types';
-import { 
-  getTrendingTVShows, 
-  getPopularTVShows, 
-  getTopRatedTVShows, 
-  getAiringTodayTVShows, 
-  getTVGenres, 
+import {
+  getTrendingTVShows,
+  getPopularTVShows,
+  getTopRatedTVShows,
+  getAiringTodayTVShows,
+  getTVGenres,
   discoverTVShowsByGenre,
   getTVShowVideos
 } from '../services/tmdb';
@@ -13,7 +13,7 @@ import HeroCarousel from '../components/HeroCarousel';
 import ContentCarousel from '../components/ContentCarousel';
 import FilterBar from '../components/FilterBar';
 
-interface TVShowsProps {}
+interface TVShowsProps { }
 
 interface HeroSlide {
   id: number;
@@ -49,7 +49,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
     try {
       const trending = await getTrendingTVShows(1);
       const featured = trending.results.slice(0, 5);
-      
+
       // Fetch trailer data for each featured show
       const heroData = await Promise.all(
         featured.map(async (show) => {
@@ -71,7 +71,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
           }
         })
       );
-      
+
       setHeroShows(heroData);
     } catch (error) {
       console.error('Error fetching hero shows:', error);
@@ -82,7 +82,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
     if (genreCache.has(genreId)) {
       return genreCache.get(genreId);
     }
-    
+
     try {
       const response = await discoverTVShowsByGenre(genreId, 1);
       genreCache.set(genreId, response.results);
@@ -147,7 +147,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
 
     // Apply search filter
     if (searchQuery) {
-      filtered = filtered.filter(show => 
+      filtered = filtered.filter(show =>
         show.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         show.overview.toLowerCase().includes(searchQuery.toLowerCase())
       );
@@ -165,7 +165,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
 
     // Apply year filter
     if (selectedYear) {
-      filtered = filtered.filter(show => 
+      filtered = filtered.filter(show =>
         show.first_air_date?.startsWith(selectedYear)
       );
     }
@@ -176,7 +176,7 @@ const TVShows: React.FC<TVShowsProps> = () => {
     }
 
     // Remove duplicates
-    const uniqueShows = filtered.filter((show, index, self) => 
+    const uniqueShows = filtered.filter((show, index, self) =>
       index === self.findIndex(s => s.id === show.id)
     );
 
@@ -196,14 +196,21 @@ const TVShows: React.FC<TVShowsProps> = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-red-600"></div>
+      <div className="min-h-screen bg-[#0A0A1F] flex items-center justify-center">
+        <div className="relative">
+          {/* Main thick spinner */}
+          <div className="h-32 w-32 netflix-spinner-thick" />
+
+          {/* Ripple effects */}
+          <div className="h-32 w-32 netflix-ripple" />
+          <div className="h-32 w-32 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-[#0A0A1F] text-white">
       {/* Hero Carousel */}
       {heroShows.length > 0 && (
         <HeroCarousel
@@ -252,19 +259,19 @@ const TVShows: React.FC<TVShowsProps> = () => {
               items={trendingShows}
               type="tv"
             />
-            
+
             <ContentCarousel
               title="Popular on CineFlix"
               items={popularShows}
               type="tv"
             />
-            
+
             <ContentCarousel
               title="Top Rated"
               items={topRatedShows}
               type="tv"
             />
-            
+
             <ContentCarousel
               title="On the Air"
               items={onAirShows}

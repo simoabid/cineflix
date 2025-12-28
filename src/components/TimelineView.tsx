@@ -171,7 +171,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({ collection }) => {
             {/* Movies on timeline */}
             <div className="relative h-40 mb-8">
               <div className="absolute top-0 left-0 right-0 h-px bg-netflix-red"></div>
-              {sortedMovies.map((movie, index) => {
+              {sortedMovies.map((movie) => {
                 const year = new Date(movie.release_date).getFullYear();
                 const position = getTimelinePosition(year);
                 const isSelected = selectedYear === year;

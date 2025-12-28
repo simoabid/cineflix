@@ -22,7 +22,7 @@ interface SimilarContentProps {
 
 const SimilarContent: React.FC<SimilarContentProps> = ({ content, title, type }) => {
   const navigate = useNavigate();
-  const { isInList, addToList, removeFromList } = useMyList();
+  const { isInList, toggleInList, removeByContentId } = useMyList();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hoveredItem, setHoveredItem] = useState<number | null>(null);
 
@@ -46,15 +46,10 @@ const SimilarContent: React.FC<SimilarContentProps> = ({ content, title, type })
     e.stopPropagation();
     
     const contentType = 'title' in item ? 'movie' : 'tv';
-    const contentItem = {
-      ...item,
-      media_type: contentType as 'movie' | 'tv'
-    };
-
     if (isInList(item.id, contentType)) {
-      removeFromList(item.id, contentType);
+      removeByContentId(item.id, contentType);
     } else {
-      addToList(contentItem);
+      toggleInList(item, contentType);
     }
   };
 

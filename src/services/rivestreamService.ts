@@ -517,10 +517,10 @@ class RivestreamService {
    * @param url string
    * @returns Promise<boolean>
    */
-  async checkSourceAvailability(url: string): Promise<boolean> {
+  async checkSourceAvailability(_url: string): Promise<boolean> {
     try {
       if (this.httpClient && typeof this.httpClient.head === 'function') {
-        await this.retryWithBackoff(() => this.httpClient!.head!(url, { timeout: 2000 }), 3, 200);
+        await this.retryWithBackoff(() => this.httpClient!.head!(_url, { timeout: 2000 }), 3, 200);
         return true;
       }
       // In a real implementation, you might want to make a HEAD request
@@ -570,7 +570,7 @@ class RivestreamService {
    * @param tmdbId number
    * @returns Promise<Array<{ season: number; episodes: number[] }>>
    */
-  async getTVShowSeasons(tmdbId: number): Promise<{ season: number; episodes: number[] }[]> {
+  async getTVShowSeasons(_tmdbId: number): Promise<{ season: number; episodes: number[] }[]> {
     // This would typically come from TMDB API or Rivestream's metadata
     // For now, return a basic structure that can be expanded
     return [

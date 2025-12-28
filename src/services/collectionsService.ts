@@ -1,4 +1,4 @@
-import { CollectionDetails, FranchiseProgress, MarathonSession, Movie } from '../types';
+import { CollectionDetails, FranchiseProgress, MarathonSession } from '../types';
 
 const COLLECTIONS_STORAGE_KEY = 'cineflix_collections_progress';
 const MARATHON_STORAGE_KEY = 'cineflix_marathon_sessions';

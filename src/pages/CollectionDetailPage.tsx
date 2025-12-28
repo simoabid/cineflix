@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { 
-  Play, 
-  Plus, 
-  Share2, 
-  Download, 
-  ChevronLeft, 
-  Star, 
-  Clock, 
-  Calendar, 
-  Film, 
+import {
+  Play,
+  Plus,
+  Share2,
+  Download,
+  ChevronLeft,
+  Star,
+  Clock,
+  Calendar,
+  Film,
   Users,
   Trophy,
   TrendingUp,
@@ -17,16 +17,12 @@ import {
   Shuffle,
   List,
   Grid,
-  Filter,
   Search,
   MoreHorizontal,
-  PlayCircle,
-  Heart,
-  Bookmark,
-  Settings
+  PlayCircle
 } from 'lucide-react';
-import { CollectionDetails, Movie, ViewingOrder } from '../types';
-import { getCollectionDetails, getImageUrl, getPosterUrl, getBackdropUrl } from '../services/tmdb';
+import { CollectionDetails, Movie } from '../types';
+import { getCollectionDetails, getPosterUrl, getBackdropUrl } from '../services/tmdb';
 import CollectionsService from '../services/collectionsService';
 import AddToListButton from '../components/AddToListButton';
 import LikeButton from '../components/LikeButton';
@@ -229,7 +225,7 @@ export const getFilteredCollectionMovies = (collection: CollectionDetails | null
 const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialCollection, loader }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  
+
   // State management
   const [collection, setCollection] = useState<CollectionDetails | null>(() => (isValidCollection(initialCollection) ? initialCollection as CollectionDetails : null));
   const [loading, setLoading] = useState<boolean>(() => (isValidCollection(initialCollection) ? false : true));
@@ -258,7 +254,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
     try {
       setLoading(true);
       setError(null);
-      
+
       const details = await (loader ? loader(collectionId) : getCollectionDetails(collectionId));
       if (!isValidCollection(details)) {
         setError('Collection not found or invalid data received');
@@ -285,10 +281,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
    */
   const handleStartWatching = (): void => {
     if (!collection || !collection.parts.length) return;
-    
+
     // Start marathon session
-    CollectionsService.startMarathonSession(collection, viewingOrder as ViewingOrder);
-    
+    CollectionsService.startMarathonSession(collection, viewingOrder);
+
     // Navigate to first movie (preserve current ordering)
     const firstMovie = collection.parts[0];
     if (firstMovie?.id) {
@@ -303,7 +299,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
    */
   const handleAddAllToList = (): void => {
     if (!collection) return;
-    
+
     collection.parts.forEach(movie => {
       // Add each movie to the user's list
       // This would integrate with the existing MyList service
@@ -318,20 +314,20 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
    */
   const toggleMovieWatched = (movieId: number): void => {
     if (!collection) return;
-    
+
     if (isMovieWatchedInCollection(collection, movieId)) {
       CollectionsService.markFilmUnwatched(collection.id, movieId);
     } else {
       CollectionsService.markFilmWatched(collection.id, movieId);
     }
-    
+
     // Refresh collection data
     fetchCollectionDetails(collection.id);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-netflix-black">
+      <div className="min-h-screen bg-[#0A0A1F]">
         <LoadingSkeleton />
       </div>
     );
@@ -339,7 +335,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
 
   if (error || !collection) {
     return (
-      <div className="min-h-screen bg-netflix-black flex items-center justify-center">
+      <div className="min-h-screen bg-[#0A0A1F] flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl text-white mb-4">{error || 'Collection not found'}</h1>
           <Link to="/collections" className="text-netflix-red hover:underline">
@@ -357,7 +353,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
   const safePoster = getPosterUrl(collection.poster_path || '', 'w500');
 
   return (
-    <div className="min-h-screen bg-netflix-black">
+    <div className="min-h-screen bg-[#0A0A1F]">
       {/* Hero Section */}
       <div className="relative h-screen overflow-hidden">
         {/* Background Image */}
@@ -367,8 +363,8 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
             alt={collection.name || 'Collection backdrop'}
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-netflix-black via-netflix-black/80 to-netflix-black/40"></div>
-          <div className="absolute inset-0 bg-gradient-to-t from-netflix-black via-transparent to-transparent"></div>
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0A0A1F] via-[#0A0A1F]/80 to-[#0A0A1F]/40"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A1F] via-transparent to-transparent"></div>
         </div>
 
         {/* Navigation */}
@@ -410,7 +406,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                   <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight mb-4">
                     {collection.name}
                   </h1>
-                  
+
                   <div className="flex flex-wrap items-center gap-4 mb-6">
                     <span className="bg-netflix-red text-white px-3 py-1 rounded-full text-sm font-semibold">
                       {collection.film_count} {collection.film_count === 1 ? 'Movie' : 'Movies'}
@@ -418,11 +414,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                     <span className="bg-gray-700 text-white px-3 py-1 rounded-full text-sm">
                       {String(collection.type || '').replace('_', ' ').toUpperCase()}
                     </span>
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      collection.status === 'complete' ? 'bg-green-600 text-white' :
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${collection.status === 'complete' ? 'bg-green-600 text-white' :
                       collection.status === 'ongoing' ? 'bg-blue-600 text-white' :
-                      'bg-yellow-600 text-black'
-                    }`}>
+                        'bg-yellow-600 text-black'
+                      }`}>
                       {(collection.status || '').toUpperCase()}
                     </span>
                   </div>
@@ -461,7 +456,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                     <Play className="w-5 h-5 mr-2 fill-current" />
                     {progress > 0 && progress < 100 ? 'Continue Watching' : 'Start Watching'}
                   </button>
-                  
+
                   <button
                     onClick={handleAddAllToList}
                     className="flex items-center bg-gray-600/70 backdrop-blur-sm text-white px-8 py-3 rounded-md font-semibold hover:bg-gray-600/90 transition-all duration-300 hover:scale-105"
@@ -469,12 +464,12 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                     <Plus className="w-5 h-5 mr-2" />
                     Add All to My List
                   </button>
-                  
+
                   <button className="flex items-center bg-gray-600/70 backdrop-blur-sm text-white px-6 py-3 rounded-md font-semibold hover:bg-gray-600/90 transition-all duration-300">
                     <Share2 className="w-5 h-5 mr-2" />
                     Share
                   </button>
-                  
+
                   <button className="flex items-center bg-gray-600/70 backdrop-blur-sm text-white px-6 py-3 rounded-md font-semibold hover:bg-gray-600/90 transition-all duration-300">
                     <Download className="w-5 h-5 mr-2" />
                     Download All
@@ -489,7 +484,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                       <span>{watchedCount} of {collection.film_count} watched</span>
                     </div>
                     <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div 
+                      <div
                         className="bg-netflix-red h-2 rounded-full animate-progress-fill"
                         style={{ '--progress-width': `${progress}%` } as any}
                       ></div>
@@ -503,7 +498,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
       </div>
 
       {/* Navigation Tabs */}
-      <div className="sticky top-20 z-40 bg-netflix-black/95 backdrop-blur-sm border-b border-gray-800">
+      <div className="sticky top-20 z-40 bg-[#0A0A1F]/95 backdrop-blur-sm border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-8">
           <nav className="flex space-x-8 overflow-x-auto">
             {[
@@ -519,11 +514,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as TabType)}
-                  className={`flex items-center space-x-2 py-4 px-2 border-b-2 whitespace-nowrap transition-colors ${
-                    activeTab === tab.id
-                      ? 'border-netflix-red text-white'
-                      : 'border-transparent text-gray-400 hover:text-white'
-                  }`}
+                  className={`flex items-center space-x-2 py-4 px-2 border-b-2 whitespace-nowrap transition-colors ${activeTab === tab.id
+                    ? 'border-netflix-red text-white'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                    }`}
                 >
                   <Icon className="w-4 h-4" />
                   <span className="font-medium">{tab.label}</span>
@@ -568,7 +562,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                         <List className="w-4 h-4" />
                       </button>
                     </div>
-                    
+
                     {/* Sort Options */}
                     <select
                       value={sortBy}
@@ -611,17 +605,16 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                                 alt={movie.title}
                                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                               />
-                              
+
                               {/* Watch Status Indicator */}
-                              <div className={`absolute top-3 left-3 w-3 h-3 rounded-full ${
-                                isMovieWatchedInCollection(collection, movie.id) ? 'bg-green-500' : 'bg-gray-500'
-                              }`}></div>
-                              
+                              <div className={`absolute top-3 left-3 w-3 h-3 rounded-full ${isMovieWatchedInCollection(collection, movie.id) ? 'bg-green-500' : 'bg-gray-500'
+                                }`}></div>
+
                               {/* Movie Number */}
                               <div className="absolute top-3 right-3 bg-black/70 text-white px-2 py-1 rounded text-sm font-bold">
                                 #{index + 1}
                               </div>
-                              
+
                               {/* Hover Overlay */}
                               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
                                 <div className="flex space-x-2">
@@ -652,7 +645,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                               </div>
                             </div>
                           </Link>
-                          
+
                           {/* Movie Info */}
                           <div className="mt-3">
                             <h3 className="text-white font-semibold truncate">{movie.title}</h3>
@@ -665,11 +658,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                             </div>
                             <button
                               onClick={() => toggleMovieWatched(movie.id)}
-                              className={`mt-2 w-full py-2 rounded text-sm font-medium transition-colors ${
-                                isMovieWatchedInCollection(collection, movie.id)
-                                  ? 'bg-green-600 text-white hover:bg-green-700'
-                                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              }`}
+                              className={`mt-2 w-full py-2 rounded text-sm font-medium transition-colors ${isMovieWatchedInCollection(collection, movie.id)
+                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                }`}
                             >
                               {isMovieWatchedInCollection(collection, movie.id) ? 'Watched' : 'Mark as Watched'}
                             </button>
@@ -702,11 +694,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                               <div className="flex items-center space-x-2 ml-4">
                                 <button
                                   onClick={() => toggleMovieWatched(movie.id)}
-                                  className={`px-3 py-1 rounded text-xs font-medium ${
-                                    isMovieWatchedInCollection(collection, movie.id)
-                                      ? 'bg-green-600 text-white'
-                                      : 'bg-gray-700 text-gray-300'
-                                  }`}
+                                  className={`px-3 py-1 rounded text-xs font-medium ${isMovieWatchedInCollection(collection, movie.id)
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-700 text-gray-300'
+                                    }`}
                                 >
                                   {isMovieWatchedInCollection(collection, movie.id) ? 'Watched' : 'Unwatched'}
                                 </button>
@@ -750,19 +741,18 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                       <PlayCircle className="w-5 h-5 mr-2" />
                       {progress > 0 && progress < 100 ? 'Continue Watching' : 'Start from Beginning'}
                     </button>
-                    
+
                     {progress > 0 && progress < 100 && (
                       <button className="w-full flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-medium transition-colors">
                         <Shuffle className="w-5 h-5 mr-2" />
                         Skip to Unwatched
                       </button>
                     )}
-                    
+
                     <button
                       onClick={() => setMarathonMode(!marathonMode)}
-                      className={`w-full flex items-center justify-center py-3 rounded-lg font-medium transition-colors ${
-                        marathonMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
-                      }`}
+                      className={`w-full flex items-center justify-center py-3 rounded-lg font-medium transition-colors ${marathonMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+                        }`}
                     >
                       <Clock className="w-5 h-5 mr-2" />
                       {marathonMode ? 'Marathon Mode On' : 'Enable Marathon Mode'}
@@ -813,11 +803,10 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Status:</span>
-                      <span className={`capitalize ${
-                        collection.status === 'complete' ? 'text-green-400' :
+                      <span className={`capitalize ${collection.status === 'complete' ? 'text-green-400' :
                         collection.status === 'ongoing' ? 'text-blue-400' :
-                        'text-yellow-400'
-                      }`}>
+                          'text-yellow-400'
+                        }`}>
                         {collection.status || 'unknown'}
                       </span>
                     </div>
@@ -840,7 +829,7 @@ const CollectionDetailPage: React.FC<CollectionDetailPageProps> = ({ initialColl
                         <div className="text-gray-400 text-sm">Complete</div>
                       </div>
                       <div className="w-full bg-gray-700 rounded-full h-2">
-                        <div 
+                        <div
                           className="bg-netflix-red h-2 rounded-full transition-all duration-500"
                           style={{ width: `${progress}%` }}
                         ></div>

@@ -1,29 +1,30 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AddToListButton from '../components/AddToListButton';
 import LikeButton from '../components/LikeButton';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Play, 
-  Star, 
-  Filter, 
-
-  Share2,
+import { Link } from 'react-router-dom';
+import { useScreenSize } from '../hooks/useScreenSize';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Star,
+  Filter,
   Grid,
   List,
-  Volume2
+  Volume2,
+  Share2
 } from 'lucide-react';
-import { 
-  getTrendingMovies, 
-  getTrendingTVShows, 
-  getPopularMovies, 
-  getPopularTVShows, 
-  getUpcomingMovies, 
+import {
+  getTrendingMovies,
+  getTrendingTVShows,
+  getPopularMovies,
+  getPopularTVShows,
+  getUpcomingMovies,
   getAiringTodayTVShows,
   getNowPlayingMovies,
   getImageUrl
 } from '../services/tmdb';
+import LogoImage from '../components/LogoImage';
 import { Movie, TVShow } from '../types';
 import { handleImageError } from '../utils/imageLoader';
 
@@ -56,7 +57,7 @@ const GENRES = {
   10766: 'Soap',
   10767: 'Talk',
   10768: 'War & Politics'
-};
+} as const;
 
 const getGenreNames = (genreIds: number[] = []) => {
   return genreIds.map(id => GENRES[id as keyof typeof GENRES] || 'Unknown').slice(0, 2);
@@ -72,211 +73,19 @@ interface SectionData {
   type: 'movie' | 'tv' | 'mixed';
 }
 
-type TMDBResponse = { results: any[] };
-
-type SectionSet = {
-  newReleases: SectionData;
-  trendingNow: SectionData;
-  comingSoon: SectionData;
-  top10Movies: SectionData;
-  top10TV: SectionData;
-  recentlyAddedMovies: SectionData;
-  recentlyAddedTV: SectionData;
-};
-
-type ContentTypeFilter = 'all' | 'movies' | 'tv';
-
-type ServiceSet = {
-  getTrendingMovies: () => Promise<TMDBResponse>;
-  getTrendingTVShows: () => Promise<TMDBResponse>;
-  getPopularMovies: () => Promise<TMDBResponse>;
-  getPopularTVShows: () => Promise<TMDBResponse>;
-  getUpcomingMovies: () => Promise<TMDBResponse>;
-  getNowPlayingMovies: (page?: number) => Promise<TMDBResponse>;
-  getAiringTodayTVShows: () => Promise<TMDBResponse>;
-};
-
-/**
- * Pure helper to normalize raw TMDB items into ContentItem shape.
- * @param items - Raw items returned by TMDB
- * @param type - 'movie' or 'tv'
- * @returns Normalized ContentItem array
- */
-export const processItems = (items: any[], type: 'movie' | 'tv'): ContentItem[] => {
-  return items.map(item => ({
-    ...item,
-    media_type: type,
-    release_date: item.release_date || item.first_air_date,
-    title: item.title || item.name,
-    original_title: item.original_title || item.original_name
-  }));
-};
-
-/**
- * Pure helper to filter items by content type.
- * Returns original items when contentType is 'all', otherwise filters by media_type.
- * @param items - Array of ContentItem
- * @param contentType - 'all' | 'movies' | 'tv'
- */
-export const filterItemsByContentType = (items: ContentItem[], contentType: ContentTypeFilter): ContentItem[] => {
-  if (!Array.isArray(items)) return [];
-  if (contentType === 'all') return items;
-  if (contentType === 'movies') return items.filter(i => i.media_type === 'movie' || !i.media_type);
-  return items.filter(i => i.media_type === 'tv');
-};
-
-/**
- * Pure helper for simple pagination.
- * @param items - Array of ContentItem
- * @param page - 1-based page number
- * @param pageSize - items per page
- */
-export const paginateItems = (items: ContentItem[], page = 1, pageSize = 20): ContentItem[] => {
-  if (!Array.isArray(items) || items.length === 0) return [];
-  const start = Math.max(0, (page - 1) * pageSize);
-  return items.slice(start, start + pageSize);
-};
-
-/**
- * Pure helper to build sections from fetched TMDB responses.
- * Uses filter and pagination helpers for clarity and testability.
- */
-export const buildSectionsFromResponses = (
-  responses: {
-    trendingMoviesData: TMDBResponse;
-    trendingTVData: TMDBResponse;
-    popularMoviesData: TMDBResponse;
-    popularTVData: TMDBResponse;
-    upcomingMoviesData: TMDBResponse;
-    recentMoviesResponse: TMDBResponse;
-    airingTodayTVData: TMDBResponse;
-  },
-  contentType: ContentTypeFilter = 'all'
-): SectionSet => {
-  const {
-    trendingMoviesData,
-    trendingTVData,
-    popularMoviesData,
-    popularTVData,
-    upcomingMoviesData,
-    recentMoviesResponse,
-    airingTodayTVData
-  } = responses;
-
-  const movies = paginateItems(processItems(trendingMoviesData?.results || [], 'movie'), 1, 20);
-  const tvShows = paginateItems(processItems(trendingTVData?.results || [], 'tv'), 1, 20);
-  const popularMovies = paginateItems(processItems(popularMoviesData?.results || [], 'movie'), 1, 20);
-  const popularTV = paginateItems(processItems(popularTVData?.results || [], 'tv'), 1, 20);
-  const upcoming = paginateItems(processItems(upcomingMoviesData?.results || [], 'movie'), 1, 20);
-  const nowPlaying = paginateItems(processItems(recentMoviesResponse?.results || [], 'movie'), 1, 20);
-  const airingToday = paginateItems(processItems(airingTodayTVData?.results || [], 'tv'), 1, 20);
-
-  const filteredMovies = filterItemsByContentType(movies, contentType);
-  const filteredTV = filterItemsByContentType(tvShows, contentType);
-  const filteredPopularMovies = filterItemsByContentType(popularMovies, contentType);
-  const filteredPopularTV = filterItemsByContentType(popularTV, contentType);
-  const filteredUpcoming = filterItemsByContentType(upcoming, contentType);
-  const filteredNowPlaying = filterItemsByContentType(nowPlaying, contentType);
-  const filteredAiringToday = filterItemsByContentType(airingToday, contentType);
-
-  const sections: SectionSet = {
-    newReleases: {
-      title: 'New Releases',
-      items: [...filteredNowPlaying, ...filteredAiringToday].sort((a, b) => 
-        new Date(b.release_date || 0).getTime() - new Date(a.release_date || 0).getTime()
-      ).slice(0, 20),
-      type: 'mixed'
-    },
-    trendingNow: {
-      title: 'Trending Now',
-      items: [...filteredMovies, ...filteredTV].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)),
-      type: 'mixed'
-    },
-    comingSoon: {
-      title: 'Coming Soon',
-      items: filteredUpcoming.sort((a, b) => 
-        new Date(a.release_date || 0).getTime() - new Date(b.release_date || 0).getTime()
-      ),
-      type: 'movie'
-    },
-    top10Movies: {
-      title: 'Top 10 Movies',
-      items: filteredPopularMovies.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
-      type: 'movie'
-    },
-    top10TV: {
-      title: 'Top 10 TV Shows',
-      items: filteredPopularTV.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
-      type: 'tv'
-    },
-    recentlyAddedMovies: {
-      title: 'Recently Added Movies',
-      items: filteredNowPlaying.slice(0, 20),
-      type: 'movie'
-    },
-    recentlyAddedTV: {
-      title: 'Recently Added TV Shows',
-      items: filteredAiringToday.slice(0, 20),
-      type: 'tv'
-    },
-  };
-
-  return sections;
-};
-
-/**
- * Fetch helper that accepts an injectable service set and returns built sections.
- * Adds defensive handling for service failures and unexpected results.
- */
-export const fetchSectionsWithServices = async (
-  services: ServiceSet,
-  contentType: ContentTypeFilter = 'all'
-): Promise<SectionSet> => {
-  const calls = [
-    services.getTrendingMovies(),
-    services.getTrendingTVShows(),
-    services.getPopularMovies(),
-    services.getPopularTVShows(),
-    services.getUpcomingMovies(),
-    services.getNowPlayingMovies(1),
-    services.getAiringTodayTVShows()
-  ];
-
-  const settled = await Promise.allSettled(calls);
-
-  const [
-    trendingMoviesData,
-    trendingTVData,
-    popularMoviesData,
-    popularTVData,
-    upcomingMoviesData,
-    recentMoviesResponse,
-    airingTodayTVData
-  ] = settled.map(result => {
-    if (result.status === 'fulfilled' && result.value && typeof result.value === 'object' && Array.isArray((result.value as any).results)) {
-      return result.value as TMDBResponse;
-    }
-    // Defensive fallback for failed or malformed responses
-    console.error('Service call failed or returned unexpected data, using empty fallback.', result);
-    return { results: [] } as TMDBResponse;
-  });
-
-  return buildSectionsFromResponses({
-    trendingMoviesData,
-    trendingTVData,
-    popularMoviesData,
-    popularTVData,
-    upcomingMoviesData,
-    recentMoviesResponse,
-    airingTodayTVData
-  }, contentType);
-};
-
 const NewPopularPage: React.FC = () => {
-  const [sections, setSections] = useState<SectionSet>({
+  const [sections, setSections] = useState<{
+    newReleases: SectionData;
+    trendingNow: SectionData;
+    comingSoon: SectionData;
+    top10Movies: SectionData;
+    top10TV: SectionData;
+    recentlyAddedMovies: SectionData;
+    recentlyAddedTV: SectionData;
+  }>({
     newReleases: { title: 'New Releases', items: [], type: 'mixed' },
     trendingNow: { title: 'Trending Now', items: [], type: 'mixed' },
-    comingSoon: { title: 'Coming Soon', items: [], type: 'movie' },
+    comingSoon: { title: 'Coming Soon', items: [], type: 'mixed' },
     top10Movies: { title: 'Top 10 Movies', items: [], type: 'movie' },
     top10TV: { title: 'Top 10 TV Shows', items: [], type: 'tv' },
     recentlyAddedMovies: { title: 'Recently Added Movies', items: [], type: 'movie' },
@@ -285,7 +94,7 @@ const NewPopularPage: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [contentType, setContentType] = useState<ContentTypeFilter>('all');
+  const [contentType, setContentType] = useState<'all' | 'movies' | 'tv'>('all');
   const [sortBy, setSortBy] = useState<'release_date' | 'popularity' | 'rating' | 'title'>('popularity');
   const [timePeriod, setTimePeriod] = useState<'week' | 'month' | 'year'>('week');
   const [heroIndex, setHeroIndex] = useState(0);
@@ -297,7 +106,6 @@ const NewPopularPage: React.FC = () => {
 
   useEffect(() => {
     fetchAllData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentType, sortBy, timePeriod]);
 
   useEffect(() => {
@@ -310,44 +118,128 @@ const NewPopularPage: React.FC = () => {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setHeroIndex((prev) => (prev + 1) % Math.max(3, heroContent.length));
+      setHeroIndex((prev) => (prev + 1) % Math.max(3, sections.trendingNow.items.length));
     }, 5000);
     return () => clearInterval(interval);
-  }, [/* updated below by heroContent */ heroIndex]);
+  }, [sections.trendingNow.items]);
 
   const fetchAllData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const newSections = await fetchSectionsWithServices({
-        getTrendingMovies,
-        getTrendingTVShows,
-        getPopularMovies,
-        getPopularTVShows,
-        getUpcomingMovies,
-        getNowPlayingMovies,
-        getAiringTodayTVShows
-      }, contentType);
+      const [
+        trendingMoviesData,
+        trendingTVData,
+        popularMoviesData,
+        popularTVData,
+        upcomingMoviesData,
+        recentMoviesResponse,
+        airingTodayTVData
+      ] = await Promise.all([
+        getTrendingMovies(),
+        getTrendingTVShows(),
+        getPopularMovies(),
+        getPopularTVShows(),
+        getUpcomingMovies(),
+        getNowPlayingMovies(1),
+        getAiringTodayTVShows()
+      ]);
 
-      setSections(newSections);
-    } catch (err: unknown) {
-      const message = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load content. Please try again later.';
-      setError(message);
+
+
+      // Combine and process data based on filters
+      const processItems = (items: any[], type: 'movie' | 'tv') => {
+        return items.map(item => ({
+          ...item,
+          media_type: type,
+          release_date: item.release_date || item.first_air_date,
+          title: item.title || item.name,
+          original_title: item.original_title || item.original_name
+        }));
+      };
+
+      const movies = processItems(trendingMoviesData.results.slice(0, 20), 'movie');
+      const tvShows = processItems(trendingTVData.results.slice(0, 20), 'tv');
+      const popularMovies = processItems(popularMoviesData.results.slice(0, 20), 'movie');
+      const popularTV = processItems(popularTVData.results.slice(0, 20), 'tv');
+      const upcoming = processItems(upcomingMoviesData.results.slice(0, 20), 'movie');
+      const nowPlaying = processItems(recentMoviesResponse.results.slice(0, 20), 'movie');
+      const airingToday = processItems(airingTodayTVData.results.slice(0, 20), 'tv');
+
+      // Filter by content type
+      let filteredMovies = movies;
+      let filteredTV = tvShows;
+      let filteredPopularMovies = popularMovies;
+      let filteredPopularTV = popularTV;
+      let filteredUpcoming = upcoming;
+      let filteredNowPlaying = nowPlaying;
+      let filteredAiringToday = airingToday;
+
+      if (contentType === 'movies') {
+        filteredTV = [];
+        filteredPopularTV = [];
+        filteredAiringToday = [];
+      } else if (contentType === 'tv') {
+        filteredMovies = [];
+        filteredPopularMovies = [];
+        filteredUpcoming = [];
+        filteredNowPlaying = [];
+      }
+
+      setSections({
+        newReleases: {
+          title: 'New Releases',
+          items: [...filteredNowPlaying, ...filteredAiringToday].sort((a, b) =>
+            new Date(b.release_date || 0).getTime() - new Date(a.release_date || 0).getTime()
+          ).slice(0, 20),
+          type: 'mixed'
+        },
+        trendingNow: {
+          title: 'Trending Now',
+          items: [...filteredMovies, ...filteredTV].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)),
+          type: 'mixed'
+        },
+        comingSoon: {
+          title: 'Coming Soon',
+          items: filteredUpcoming.sort((a, b) =>
+            new Date(a.release_date || 0).getTime() - new Date(b.release_date || 0).getTime()
+          ),
+          type: 'movie'
+        },
+        top10Movies: {
+          title: 'Top 10 Movies',
+          items: filteredPopularMovies.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
+          type: 'movie'
+        },
+        top10TV: {
+          title: 'Top 10 TV Shows',
+          items: filteredPopularTV.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 10),
+          type: 'tv'
+        },
+        recentlyAddedMovies: {
+          title: 'Recently Added Movies',
+          items: filteredNowPlaying.slice(0, 20),
+          type: 'movie'
+        },
+        recentlyAddedTV: {
+          title: 'Recently Added TV Shows',
+          items: filteredAiringToday.slice(0, 20),
+          type: 'tv'
+        },
+      });
+
+    } catch (err) {
+      setError('Failed to load content. Please try again later.');
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const heroContent = useMemo(() => sections.trendingNow.items.slice(0, 5), [sections.trendingNow.items]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setHeroIndex((prev) => (prev + 1) % Math.max(3, heroContent.length));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [heroContent.length]);
+
+  const heroContent = sections.trendingNow.items.slice(0, 5);
 
   const handleHeroNavigation = useCallback((direction: 'prev' | 'next') => {
     setHeroIndex(prev => {
@@ -358,16 +250,28 @@ const NewPopularPage: React.FC = () => {
     });
   }, [heroContent.length]);
 
-  const sectionEntries = useMemo(() => Object.entries(sections), [sections]);
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-netflix-black">
+      <div className="min-h-screen bg-[#0A0A1F]">
         <div className="flex items-center justify-center h-screen">
-          <div className="relative">
-            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-netflix-red"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-netflix-red text-sm font-medium">Loading...</div>
+          <div className="flex flex-col items-center gap-6">
+            <div className="relative">
+              {/* Main thick spinner */}
+              <div className="h-32 w-32 netflix-spinner-thick" />
+
+              {/* Ripple effects */}
+              <div className="h-32 w-32 netflix-ripple" />
+              <div className="h-32 w-32 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+            </div>
+
+            {/* Loading text with dots */}
+            <div className="text-center loading-text">
+              <p className="text-white text-xl font-medium mb-3">Loading New & Popular</p>
+              <div className="flex gap-2 justify-center">
+                <div className="netflix-dot" />
+                <div className="netflix-dot" />
+                <div className="netflix-dot" />
+              </div>
             </div>
           </div>
         </div>
@@ -377,12 +281,12 @@ const NewPopularPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-netflix-black">
+      <div className="min-h-screen bg-[#0A0A1F]">
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-white mb-4">Error</h2>
             <p className="text-netflix-lightgray mb-4">{error}</p>
-            <button 
+            <button
               onClick={fetchAllData}
               className="bg-netflix-red text-white px-6 py-2 rounded hover:bg-red-600 transition"
             >
@@ -395,10 +299,10 @@ const NewPopularPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-netflix-black text-white">
+    <div className="min-h-screen bg-[#0A0A1F] text-white">
       {/* Hero Section */}
       {heroContent.length > 0 && (
-        <div 
+        <div
           ref={heroRef}
           className="relative h-[70vh] md:h-[85vh] overflow-hidden"
         >
@@ -409,29 +313,39 @@ const NewPopularPage: React.FC = () => {
               className="w-full h-full object-cover transition-transform duration-1000 ease-in-out"
               onError={handleImageError}
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-netflix-black via-netflix-black/60 to-transparent"></div>
-            <div className="absolute inset-0 bg-gradient-to-t from-netflix-black via-transparent to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0A0A1F] via-[#0A0A1F]/60 to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A1F] via-transparent to-transparent"></div>
           </div>
 
           {/* Navigation arrows */}
-          <button 
+          <button
             onClick={() => handleHeroNavigation('prev')}
-            className="absolute left-4 top-1/2 transform -translate-y-1/2 z-10 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-opacity duration-300"
+            className="absolute left-2 sm:left-4 top-1/2 transform -translate-y-1/2 z-10 p-2 bg-black/60 hover:bg-black/80 rounded-full transition-all duration-300 backdrop-blur-sm border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
           >
-            <ChevronLeft className="w-6 h-6" />
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </button>
-          <button 
+          <button
             onClick={() => handleHeroNavigation('next')}
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 z-10 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-opacity duration-300"
+            className="absolute right-2 sm:right-4 top-1/2 transform -translate-y-1/2 z-10 p-2 bg-black/60 hover:bg-black/80 rounded-full transition-all duration-300 backdrop-blur-sm border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
           >
-            <ChevronRight className="w-6 h-6" />
+            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </button>
 
           <div className="absolute inset-0 flex items-center px-4 md:px-16">
             <div className="max-w-2xl animate-fade-in">
-              <h1 className="text-4xl md:text-6xl font-bold mb-4 animate-slide-up">
-                {heroContent[heroIndex]?.title || heroContent[heroIndex]?.name}
-              </h1>
+              <div className="mb-4 animate-slide-up">
+                <LogoImage
+                  logoPath={heroContent[heroIndex]?.logo_path}
+                  title={heroContent[heroIndex]?.title || heroContent[heroIndex]?.name || ''}
+                  size="xl"
+                  className="justify-start"
+                  textClassName="text-4xl md:text-6xl font-bold"
+                  maxHeight="max-h-20 md:max-h-28 lg:max-h-32"
+                  contentId={heroContent[heroIndex]?.id}
+                  contentType={heroContent[heroIndex]?.media_type || 'movie'}
+                  enableOnDemandFetch={true}
+                />
+              </div>
               <p className="text-lg md:text-xl text-netflix-lightgray mb-6 line-clamp-3 animate-slide-up animation-delay-200">
                 {heroContent[heroIndex]?.overview}
               </p>
@@ -461,9 +375,8 @@ const NewPopularPage: React.FC = () => {
             {heroContent.map((_, index) => (
               <button
                 key={index}
-                className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                  index === heroIndex ? 'bg-white w-8' : 'bg-white/50 hover:bg-white/70'
-                }`}
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${index === heroIndex ? 'bg-white w-8' : 'bg-white/50 hover:bg-white/70'
+                  }`}
                 onClick={() => setHeroIndex(index)}
               />
             ))}
@@ -472,9 +385,8 @@ const NewPopularPage: React.FC = () => {
       )}
 
       {/* Filter Bar */}
-      <div className={`sticky top-0 z-40 transition-all duration-300 ${
-        isScrolled ? 'bg-netflix-black/95 backdrop-blur-md shadow-lg' : 'bg-netflix-black/90 backdrop-blur-sm'
-      } border-b border-gray-800`}>
+      <div className={`sticky top-0 z-40 transition-all duration-300 ${isScrolled ? 'bg-[#0A0A1F]/95 backdrop-blur-md shadow-lg' : 'bg-[#0A0A1F]/90 backdrop-blur-sm'
+        } border-b border-gray-800`}>
         <div className="px-4 md:px-16 py-4">
           <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
             <div>
@@ -483,33 +395,31 @@ const NewPopularPage: React.FC = () => {
               </h2>
               <p className="text-sm text-netflix-lightgray mt-1">Discover trending content</p>
             </div>
-            
+
             <div className="flex gap-3 items-center">
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => setViewMode('carousel')}
-                  className={`p-2 rounded transition ${
-                    viewMode === 'carousel'
-                      ? 'bg-netflix-red text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  }`}
+                  className={`p-2 rounded transition ${viewMode === 'carousel'
+                    ? 'bg-netflix-red text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
                   title="Carousel view"
                 >
                   <List className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded transition ${
-                    viewMode === 'grid'
-                      ? 'bg-netflix-red text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  }`}
+                  className={`p-2 rounded transition ${viewMode === 'grid'
+                    ? 'bg-netflix-red text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
                   title="Grid view"
                 >
                   <Grid className="w-4 h-4" />
                 </button>
               </div>
-              
+
               <button
                 onClick={() => setShowFilters(!showFilters)}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-800 rounded hover:bg-gray-700 transition"
@@ -582,7 +492,7 @@ const NewPopularPage: React.FC = () => {
 
       {/* Content Sections */}
       <div className="px-4 md:px-16 py-8 space-y-12">
-        {sectionEntries.map(([key, section]) => (
+        {Object.entries(sections).map(([key, section]) => (
           <ContentSection
             key={key}
             id={key}
@@ -615,7 +525,8 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
-  const [hoveredCard, setHoveredCard] = useState<number | null>(null);
+  // Keeping hovered state reserved for future micro-interactions if needed
+  // const [hoveredCard, setHoveredCard] = useState<number | null>(null);
 
   useEffect(() => {
     const checkScroll = () => {
@@ -638,10 +549,10 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
     if (scrollRef.current) {
       const scrollAmount = window.innerWidth > 768 ? 600 : 300;
       const currentScroll = scrollRef.current.scrollLeft;
-      const newScroll = direction === 'left' 
-        ? currentScroll - scrollAmount 
+      const newScroll = direction === 'left'
+        ? currentScroll - scrollAmount
         : currentScroll + scrollAmount;
-      
+
       scrollRef.current.scrollTo({
         left: newScroll,
         behavior: 'smooth'
@@ -661,16 +572,14 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
           {items.length} {items.length === 1 ? 'item' : 'items'}
         </p>
       </div>
-      
       <div className="flex gap-2" role="group" aria-label="Carousel navigation">
         <button
           onClick={() => scroll('left')}
           disabled={!canScrollLeft}
-          className={`p-2 rounded-full transition ${
-            canScrollLeft 
-              ? 'bg-gray-800 hover:bg-gray-700 text-white' 
-              : 'bg-gray-900 text-gray-600 cursor-not-allowed'
-          }`}
+          className={`p-2 rounded-full transition ${canScrollLeft
+            ? 'bg-gray-800 hover:bg-gray-700 text-white'
+            : 'bg-gray-900 text-gray-600 cursor-not-allowed'
+            }`}
           aria-label="Scroll left"
         >
           <ChevronLeft className="w-5 h-5" />
@@ -678,11 +587,10 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
         <button
           onClick={() => scroll('right')}
           disabled={!canScrollRight}
-          className={`p-2 rounded-full transition ${
-            canScrollRight 
-              ? 'bg-gray-800 hover:bg-gray-700 text-white' 
-              : 'bg-gray-900 text-gray-600 cursor-not-allowed'
-          }`}
+          className={`p-2 rounded-full transition ${canScrollRight
+            ? 'bg-gray-800 hover:bg-gray-700 text-white'
+            : 'bg-gray-900 text-gray-600 cursor-not-allowed'
+            }`}
           aria-label="Scroll right"
         >
           <ChevronRight className="w-5 h-5" />
@@ -708,8 +616,8 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
             item={item}
             index={index}
             type={type}
-            onHover={setHoveredCard}
-            isHovered={hoveredCard === index}
+            onHover={() => { }}
+            isHovered={false}
           />
         ))}
       </div>
@@ -717,7 +625,9 @@ const ContentSection: React.FC<ContentSectionProps> = ({ id, title, items, type 
   );
 }
 
-interface ContentCardProps {
+export default NewPopularPage;
+
+interface ContentCardPropsInline {
   item: ContentItem;
   index: number;
   type: 'movie' | 'tv' | 'mixed';
@@ -725,15 +635,19 @@ interface ContentCardProps {
   isHovered?: boolean;
 }
 
-const ContentCard: React.FC<ContentCardProps> = ({ 
-  item, 
-  index, 
-  type, 
-  onHover, 
-  isHovered 
+const ContentCard: React.FC<ContentCardPropsInline> = ({
+  item,
+  index,
+  type,
+  onHover,
+  isHovered
 }) => {
   const [localIsHovered, setLocalIsHovered] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const { isMobile, isTablet } = useScreenSize();
+
+  // Disable hover effects on mobile and tablet
+  const shouldShowHover = !isMobile && !isTablet;
 
   const isNew = () => {
     if (!item.release_date) return false;
@@ -744,22 +658,25 @@ const ContentCard: React.FC<ContentCardProps> = ({
   };
 
   const handleMouseEnter = () => {
-    setLocalIsHovered(true);
-    onHover?.(index);
+    if (shouldShowHover) {
+      setLocalIsHovered(true);
+      onHover?.(index);
+    }
   };
 
   const handleMouseLeave = () => {
-    setLocalIsHovered(false);
-    onHover?.(null);
+    if (shouldShowHover) {
+      setLocalIsHovered(false);
+      onHover?.(null);
+    }
   };
 
-  const actualHovered = isHovered !== undefined ? isHovered : localIsHovered;
+  const actualHovered = shouldShowHover && (isHovered !== undefined ? isHovered : localIsHovered);
 
   return (
     <div
-      className={`relative flex-shrink-0 w-48 md:w-64 group cursor-pointer transition-all duration-300 ${
-        actualHovered ? 'scale-105 z-10' : 'scale-100'
-      }`}
+      className={`relative flex-shrink-0 w-36 sm:w-40 md:w-48 lg:w-64 group cursor-pointer transition-all duration-300 ${actualHovered ? 'scale-105 z-10' : 'scale-100'
+        }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -769,26 +686,24 @@ const ContentCard: React.FC<ContentCardProps> = ({
           {!imageLoaded && (
             <div className="absolute inset-0 bg-gray-800 animate-pulse" />
           )}
-          
+
           <img
             src={getImageUrl(item.poster_path || null, 'w500')}
             alt={item.title || item.name}
-            className={`w-full h-full object-cover transition-all duration-500 ${
-              imageLoaded ? 'opacity-100' : 'opacity-0'
-            } ${actualHovered ? 'scale-110' : 'scale-100'}`}
+            className={`w-full h-full object-cover transition-all duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'
+              } ${actualHovered ? 'scale-110' : 'scale-100'}`}
             onError={handleImageError}
             onLoad={() => setImageLoaded(true)}
           />
-          
+
           {/* Gradient overlay */}
-          <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent transition-opacity duration-300 ${
-            actualHovered ? 'opacity-100' : 'opacity-0'
-          }`}>
+          <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent transition-opacity duration-300 ${actualHovered ? 'opacity-100' : 'opacity-0'
+            }`}>
             <div className="absolute bottom-0 left-0 right-0 p-4">
               <h4 className="text-sm font-bold mb-2 line-clamp-2">
                 {item.title || item.name}
               </h4>
-              
+
               <div className="flex items-center gap-2 text-xs text-gray-300 mb-2">
                 <div className="flex items-center gap-1">
                   <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
@@ -815,9 +730,8 @@ const ContentCard: React.FC<ContentCardProps> = ({
           </div>
 
           {/* Action buttons */}
-          <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${
-            actualHovered ? 'opacity-100' : 'opacity-0'
-          }`}>
+          <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${actualHovered ? 'opacity-100' : 'opacity-0'
+            }`}>
             <div className="flex gap-3">
               <button className="bg-white/90 text-black rounded-full p-3 hover:bg-white transition hover:scale-110">
                 <Play className="w-5 h-5 fill-black" />
@@ -842,7 +756,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
                 NEW
               </div>
             )}
-            
+
             {type === 'movie' && index < 10 && (
               <div className="bg-black/80 text-white text-sm font-bold px-2 py-1 rounded backdrop-blur-sm">
                 #{index + 1}
@@ -885,5 +799,3 @@ const ContentCard: React.FC<ContentCardProps> = ({
     </div>
   );
 };
-
-export default NewPopularPage;

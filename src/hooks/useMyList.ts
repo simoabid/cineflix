@@ -6,20 +6,8 @@ import { Movie, TVShow } from '../types';
 type ContentType = 'movie' | 'tv';
 
 type UseMyListOptions = {
-  /**
-   * Optional storage client to use for persistence operations.
-   * Defaults to the app's myListService. Inject a mock or alternative implementation for testing.
-   */
   storageClient?: typeof myListService;
-  /**
-   * Optional callback invoked when a persistence operation fails.
-   * Receives the error as the single argument.
-   */
   onPersistenceError?: (error: unknown) => void;
-  /**
-   * Optional retry/fallback handler invoked after onPersistenceError.
-   * Handlers can implement retry logic or fallback behavior.
-   */
   onRetry?: () => void;
 };
 
@@ -27,31 +15,26 @@ type UseMyListReturn = {
   myListItems: MyListItem[];
   isLoading: boolean;
   isInList: (contentId: number, contentType: ContentType) => boolean;
-  addToList: (content: Movie | TVShow, contentType: ContentType) => MyListItem | undefined;
-  removeFromList: (itemId: string) => void;
-  removeByContentId: (contentId: number, contentType: ContentType) => void;
-  updateItem: (itemId: string, updates: Partial<MyListItem>) => void;
-  updateProgress: (contentId: number, contentType: ContentType, progress: number) => void;
-  toggleInList: (content: Movie | TVShow, contentType: ContentType) => boolean;
-  getStats: () => any;
-  getContinueWatching: () => MyListItem[];
-  getRecentlyAdded: (limit?: number) => MyListItem[];
-  loadMyList: () => void;
+  isLiked: (contentId: number, contentType: ContentType) => boolean;
+  addToList: (content: Movie | TVShow, contentType: ContentType) => Promise<MyListItem | undefined>;
+  removeFromList: (itemId: string) => Promise<void>;
+  removeByContentId: (contentId: number, contentType: ContentType) => Promise<void>;
+  toggleLike: (content: Movie | TVShow, contentType: ContentType) => Promise<boolean>;
+  updateItem: (itemId: string, updates: Partial<MyListItem>) => Promise<void>;
+  updateProgress: (contentId: number, contentType: ContentType, progress: number) => Promise<void>;
+  toggleInList: (content: Movie | TVShow, contentType: ContentType) => Promise<boolean>;
+  getStats: () => Promise<any>;
+  getContinueWatching: () => Promise<MyListItem[]>;
+  getRecentlyAdded: (limit?: number) => Promise<MyListItem[]>;
+  loadMyList: () => Promise<void>;
 };
 
-/**
- * Helper: determine item status from progress percentage.
- * Extracted to keep state transition logic simple and testable.
- */
 const determineStatusFromProgress = (progress: number): MyListItem['status'] => {
   if (progress >= 100) return 'completed';
   if (progress > 0) return 'inProgress';
   return 'notStarted';
 };
 
-/**
- * Helper: find an item by content id and type from a list.
- */
 const findItemByContent = (
   items: MyListItem[],
   contentId: number,
@@ -60,74 +43,65 @@ const findItemByContent = (
   return items.find(item => item.contentId === contentId && item.contentType === contentType);
 };
 
-/**
- * useMyList
- *
- * Public hook to manage the user's "My List". Side-effects (persistence) are injectable via options,
- * and persistence errors are surfaced via callbacks to enable retries or fallback behavior in callers.
- *
- * The public interface (returned functions) remains stable for callers.
- *
- * @param options Optional injection points for storage client and error/retry handlers.
- * @returns An object containing list state and actions.
- */
 export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
   const storageClient = options?.storageClient ?? myListService;
   const onPersistenceError = options?.onPersistenceError;
   const onRetry = options?.onRetry;
 
   const [myListItems, setMyListItems] = useState<MyListItem[]>([]);
+  const [likedItems, setLikedItems] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
 
   const handlePersistenceError = useCallback((error: unknown, contextMessage?: string) => {
-    // Centralized error handling for persistence failures.
     try {
-      if (contextMessage) {
-        console.error(contextMessage, error);
-      } else {
-        console.error('Persistence error:', error);
-      }
-      if (typeof onPersistenceError === 'function') {
-        onPersistenceError(error);
-      }
-      if (typeof onRetry === 'function') {
-        // Allow callers to decide if they want to attempt a retry/fallback.
-        onRetry();
-      }
+      if (contextMessage) console.error(contextMessage, error);
+      else console.error('Persistence error:', error);
+      if (typeof onPersistenceError === 'function') onPersistenceError(error);
+      if (typeof onRetry === 'function') onRetry();
     } catch (handlerError) {
-      // Ensure we never swallow the original error silently if error handlers themselves fail.
       console.error('Error while handling persistence error:', handlerError);
     }
   }, [onPersistenceError, onRetry]);
 
-  // Load my list items
-  const loadMyList = useCallback(() => {
+  // Load my list items and liked items - async
+  const loadMyList = useCallback(async () => {
     setIsLoading(true);
     try {
-      const items = storageClient.getMyList();
+      const [items, liked] = await Promise.all([
+        storageClient.getMyList(),
+        storageClient.getLikedContent()
+      ]);
       setMyListItems(Array.isArray(items) ? items : []);
+
+      const likedSet = new Set<string>();
+      if (Array.isArray(liked)) {
+        liked.forEach(item => likedSet.add(`${item.contentType}_${item.contentId}`));
+      }
+      setLikedItems(likedSet);
+
     } catch (error) {
-      handlePersistenceError(error, 'Error loading My List:');
-      // Preserve previous behavior of not throwing from load (e.g., mount effect).
+      handlePersistenceError(error, 'Error loading My List data:');
+      setMyListItems([]);
+      setLikedItems(new Set());
     } finally {
       setIsLoading(false);
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Check if item is in list
+  // Check if item is in list - uses local state for sync access
   const isInList = useCallback((contentId: number, contentType: ContentType) => {
-    try {
-      return storageClient.isInList(contentId, contentType);
-    } catch (error) {
-      handlePersistenceError(error, 'Error checking item in My List:');
-      return false;
-    }
-  }, [storageClient, handlePersistenceError]);
+    return myListItems.some(item => item.contentId === contentId && item.contentType === contentType);
+  }, [myListItems]);
 
-  // Add item to list
-  const addToList = useCallback((content: Movie | TVShow, contentType: ContentType) => {
+  // Check if item is liked
+  const isLiked = useCallback((contentId: number, contentType: ContentType) => {
+    return likedItems.has(`${contentType}_${contentId}`);
+  }, [likedItems]);
+
+  // Add item to list - async
+  const addToList = useCallback(async (content: Movie | TVShow, contentType: ContentType) => {
     try {
-      const newItem = storageClient.addToList(content, contentType);
+      const newItem = await storageClient.addToList(content, contentType);
       setMyListItems(prev => [...prev, newItem]);
       return newItem;
     } catch (error) {
@@ -136,10 +110,10 @@ export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Remove item from list
-  const removeFromList = useCallback((itemId: string) => {
+  // Remove item from list - async
+  const removeFromList = useCallback(async (itemId: string) => {
     try {
-      storageClient.removeFromList(itemId);
+      await storageClient.removeFromList(itemId);
       setMyListItems(prev => prev.filter(item => item.id !== itemId));
     } catch (error) {
       handlePersistenceError(error, 'Error removing from My List:');
@@ -147,25 +121,46 @@ export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Remove by content ID
-  const removeByContentId = useCallback((contentId: number, contentType: ContentType) => {
+  // Remove by content ID - async
+  const removeByContentId = useCallback(async (contentId: number, contentType: ContentType) => {
     try {
-      const items = storageClient.getMyList();
-      const itemToRemove = findItemByContent(items, contentId, contentType);
-
+      const itemToRemove = findItemByContent(myListItems, contentId, contentType);
       if (itemToRemove) {
-        removeFromList(itemToRemove.id);
+        await removeFromList(itemToRemove.id);
       }
     } catch (error) {
       handlePersistenceError(error, 'Error removing from My List by content id:');
       throw error;
     }
-  }, [storageClient, removeFromList, handlePersistenceError]);
+  }, [myListItems, removeFromList, handlePersistenceError]);
 
-  // Update item
-  const updateItem = useCallback((itemId: string, updates: Partial<MyListItem>) => {
+  // Toggle like status
+  const toggleLike = useCallback(async (content: Movie | TVShow, contentType: ContentType) => {
     try {
-      storageClient.updateItem(itemId, updates);
+      const isNowLiked = await storageClient.toggleLike(content.id, contentType);
+
+      setLikedItems(prev => {
+        const newSet = new Set(prev);
+        const key = `${contentType}_${content.id}`;
+        if (isNowLiked) {
+          newSet.add(key);
+        } else {
+          newSet.delete(key);
+        }
+        return newSet;
+      });
+
+      return isNowLiked;
+    } catch (error) {
+      handlePersistenceError(error, 'Error toggling like:');
+      throw error;
+    }
+  }, [storageClient, handlePersistenceError]);
+
+  // Update item - async
+  const updateItem = useCallback(async (itemId: string, updates: Partial<MyListItem>) => {
+    try {
+      await storageClient.updateItem(itemId, updates);
       setMyListItems(prev =>
         prev.map(item =>
           item.id === itemId ? { ...item, ...updates } : item
@@ -177,15 +172,13 @@ export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Update progress
-  const updateProgress = useCallback((contentId: number, contentType: ContentType, progress: number) => {
+  // Update progress - async
+  const updateProgress = useCallback(async (contentId: number, contentType: ContentType, progress: number) => {
     try {
-      const items = storageClient.getMyList();
-      const item = findItemByContent(items, contentId, contentType);
-
+      const item = findItemByContent(myListItems, contentId, contentType);
       if (item) {
         const status = determineStatusFromProgress(progress);
-        updateItem(item.id, {
+        await updateItem(item.id, {
           progress,
           status,
           lastWatched: new Date().toISOString(),
@@ -196,47 +189,47 @@ export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
       handlePersistenceError(error, 'Error updating progress:');
       throw error;
     }
-  }, [storageClient, updateItem, handlePersistenceError]);
+  }, [myListItems, updateItem, handlePersistenceError]);
 
-  // Get list stats
-  const getStats = useCallback(() => {
+  // Get list stats - async
+  const getStats = useCallback(async () => {
     try {
-      return storageClient.getListStats();
+      return await storageClient.getListStats();
     } catch (error) {
       handlePersistenceError(error, 'Error getting My List stats:');
       return null;
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Get continue watching items
-  const getContinueWatching = useCallback(() => {
+  // Get continue watching items - async
+  const getContinueWatching = useCallback(async () => {
     try {
-      return storageClient.getContinueWatching();
+      return await storageClient.getContinueWatching();
     } catch (error) {
       handlePersistenceError(error, 'Error getting continue watching items:');
       return [];
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Get recently added items
-  const getRecentlyAdded = useCallback((limit?: number) => {
+  // Get recently added items - async
+  const getRecentlyAdded = useCallback(async (limit?: number) => {
     try {
-      return storageClient.getRecentlyAdded(limit);
+      return await storageClient.getRecentlyAdded(limit);
     } catch (error) {
       handlePersistenceError(error, 'Error getting recently added items:');
       return [];
     }
   }, [storageClient, handlePersistenceError]);
 
-  // Toggle item in list
-  const toggleInList = useCallback((content: Movie | TVShow, contentType: ContentType) => {
+  // Toggle item in list - async
+  const toggleInList = useCallback(async (content: Movie | TVShow, contentType: ContentType) => {
     const inList = isInList(content.id, contentType);
 
     if (inList) {
-      removeByContentId(content.id, contentType);
+      await removeByContentId(content.id, contentType);
       return false;
     } else {
-      addToList(content, contentType);
+      await addToList(content, contentType);
       return true;
     }
   }, [isInList, removeByContentId, addToList]);
@@ -250,9 +243,11 @@ export const useMyList = (options?: UseMyListOptions): UseMyListReturn => {
     myListItems,
     isLoading,
     isInList,
+    isLiked,
     addToList,
     removeFromList,
     removeByContentId,
+    toggleLike,
     updateItem,
     updateProgress,
     toggleInList,

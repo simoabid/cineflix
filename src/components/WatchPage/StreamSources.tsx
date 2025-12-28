@@ -333,8 +333,93 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
         </motion.div>
       )}
 
-            {/* Compact Sources Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+      {/* Compact Sources Grid */}
+      <div className="grid grid-cols-2 min-[450px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+        {/* VidSrc Card with Internal Options */}
+        {vidsrcSources.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 ${vidsrcSources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600'
+              }`}
+          >
+            {/* Active Indicator */}
+            {vidsrcSources.some(s => selectedSource?.id === s.id) && (
+              <div className="absolute top-2 right-2 w-3 h-3 bg-[#ff0000] rounded-full">
+                <div className="w-2 h-2 bg-white rounded-full absolute top-0.5 left-0.5"></div>
+              </div>
+            )}
+
+            {/* VidSrc Header */}
+            <div className="flex flex-col items-center text-center mb-3">
+              <div className="w-8 h-8 bg-orange-500/20 rounded-lg flex items-center justify-center mb-2">
+                <span className="text-lg">🎥</span>
+              </div>
+              <h3 className="text-white font-medium text-sm mb-1">VidSrc</h3>
+              <p className="text-gray-400 text-xs mb-2">
+                {vidsrcSources.some(s => selectedSource?.id === s.id) ? (
+                  <span className="text-[#ff0000] font-medium">✓ Active</span>
+                ) : (
+                  '4 API variants'
+                )}
+              </p>
+            </div>
+
+            {/* API Options */}
+            <div className="space-y-1">
+              {vidsrcSources.map((source) => {
+                const isLoading = loadingSource === source.id;
+                const isSelected = selectedSource?.id === source.id;
+                const apiNum = source.id.split('_')[2];
+
+                // Get API description
+                const getAPIDescription = (api: string) => {
+                  switch (api) {
+                    case '1': return 'Multi Server';
+                    case '2': return 'Multi Language';
+                    case '3': return 'Multi Embeds';
+                    case '4': return 'Premium';
+                    default: return `API ${api}`;
+                  }
+                };
+
+                return (
+                  <button
+                    key={source.id}
+                    onClick={() => handleSelectSource(source)}
+                    disabled={isLoading}
+                    className={`w-full px-2 py-1 rounded text-xs font-medium transition-all duration-300 flex items-center justify-between ${isSelected
+                      ? 'bg-[#ff0000] text-white'
+                      : isLoading
+                        ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                  >
+                    <div className="flex items-center space-x-1">
+                      <span>API {apiNum}</span>
+                      <span className="text-gray-400">•</span>
+                      <span className="text-xs">{getAPIDescription(apiNum)}</span>
+                    </div>
+                    <div className="flex items-center space-x-1">
+                      {isLoading ? (
+                        <div className="animate-spin rounded-full h-3 w-3 border border-white border-t-transparent"></div>
+                      ) : isSelected ? (
+                        <CheckCircle className="h-3 w-3" />
+                      ) : (
+                        <div className={`w-2 h-2 rounded-full ${source.isAdFree ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
+                      )}
+                      <span className="text-xs">{source.quality}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
         {/* 1st - Vidjoy Card */}
         {otherSources.filter(s => s.id === 'vidjoy_player').length > 0 && (
           <motion.div
@@ -345,11 +430,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               const vidjoySource = otherSources.find(s => s.id === 'vidjoy_player');
               if (vidjoySource && vidjoySource.url !== '') handleSelectSource(vidjoySource);
             }}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              otherSources.some(s => s.id === 'vidjoy_player' && selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${otherSources.some(s => s.id === 'vidjoy_player' && selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {otherSources.some(s => s.id === 'vidjoy_player' && selectedSource?.id === s.id) && (
@@ -387,7 +471,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
 
               {/* Loading Spinner */}
               {otherSources.some(s => s.id === 'vidjoy_player' && loadingSource === s.id) && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-800/80 rounded-lg">
+                <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A1F]/80 rounded-lg">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#ff0000] border-t-transparent"></div>
                 </div>
               )}
@@ -405,11 +489,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               const cinemaosSource = otherSources.find(s => s.id === 'cinemaos_player');
               if (cinemaosSource && cinemaosSource.url !== '') handleSelectSource(cinemaosSource);
             }}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              otherSources.some(s => s.id === 'cinemaos_player' && selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${otherSources.some(s => s.id === 'cinemaos_player' && selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {otherSources.some(s => s.id === 'cinemaos_player' && selectedSource?.id === s.id) && (
@@ -422,7 +505,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             <div className="flex flex-col items-center text-center">
               <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center mb-2">
                 <span className="text-lg">🎭</span>
-            </div>
+              </div>
 
               {/* Service Name */}
               <h3 className="text-white font-medium text-sm mb-1 leading-tight">
@@ -462,11 +545,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
             onClick={() => rivestreamS2Sources.length > 0 && handleSelectSource(rivestreamS2Sources[0])}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              rivestreamS2Sources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${rivestreamS2Sources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {rivestreamS2Sources.some(s => selectedSource?.id === s.id) && (
@@ -508,9 +590,9 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               {rivestreamS2Sources.some(s => loadingSource === s.id) && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-800/80 rounded-lg">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#ff0000] border-t-transparent"></div>
-                      </div>
-                    )}
-                  </div>
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
 
@@ -521,11 +603,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25 }}
             onClick={() => vidsrcPremiumSources.length > 0 && handleSelectSource(vidsrcPremiumSources[0])}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              vidsrcPremiumSources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${vidsrcPremiumSources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {vidsrcPremiumSources.some(s => selectedSource?.id === s.id) && (
@@ -567,7 +648,7 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               {vidsrcPremiumSources.some(s => loadingSource === s.id) && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-800/80 rounded-lg">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#ff0000] border-t-transparent"></div>
-                    </div>
+                </div>
               )}
             </div>
           </motion.div>
@@ -579,11 +660,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 ${
-              rivestreamSources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 ${rivestreamSources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+              }`}
           >
             {/* Active Indicator */}
             {rivestreamSources.some(s => selectedSource?.id === s.id) && (
@@ -620,13 +700,12 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
                     key={source.id}
                     onClick={() => handleSelectSource(source)}
                     disabled={isLoading}
-                    className={`w-full px-2 py-1 rounded text-xs font-medium transition-all duration-300 flex items-center justify-between ${
-                      isSelected
-                        ? 'bg-[#ff0000] text-white'
-                        : isLoading
+                    className={`w-full px-2 py-1 rounded text-xs font-medium transition-all duration-300 flex items-center justify-between ${isSelected
+                      ? 'bg-[#ff0000] text-white'
+                      : isLoading
                         ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center space-x-1">
                       <span>Server {serverNum}</span>
@@ -651,92 +730,6 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
           </motion.div>
         )}
 
-        {/* VidSrc Card with Internal Options */}
-        {vidsrcSources.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 ${
-              vidsrcSources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600'
-            }`}
-          >
-            {/* Active Indicator */}
-            {vidsrcSources.some(s => selectedSource?.id === s.id) && (
-              <div className="absolute top-2 right-2 w-3 h-3 bg-[#ff0000] rounded-full">
-                <div className="w-2 h-2 bg-white rounded-full absolute top-0.5 left-0.5"></div>
-              </div>
-            )}
-
-            {/* VidSrc Header */}
-            <div className="flex flex-col items-center text-center mb-3">
-              <div className="w-8 h-8 bg-orange-500/20 rounded-lg flex items-center justify-center mb-2">
-                <span className="text-lg">🎥</span>
-              </div>
-              <h3 className="text-white font-medium text-sm mb-1">VidSrc</h3>
-              <p className="text-gray-400 text-xs mb-2">
-                {vidsrcSources.some(s => selectedSource?.id === s.id) ? (
-                  <span className="text-[#ff0000] font-medium">✓ Active</span>
-                ) : (
-                  '4 API variants'
-                )}
-              </p>
-            </div>
-
-            {/* API Options */}
-            <div className="space-y-1">
-              {vidsrcSources.map((source) => {
-                const isLoading = loadingSource === source.id;
-                const isSelected = selectedSource?.id === source.id;
-                const apiNum = source.id.split('_')[2];
-
-                // Get API description
-                const getAPIDescription = (api: string) => {
-                  switch(api) {
-                    case '1': return 'Multi Server';
-                    case '2': return 'Multi Language';
-                    case '3': return 'Multi Embeds';
-                    case '4': return 'Premium';
-                    default: return `API ${api}`;
-                  }
-                };
-
-                return (
-                  <button
-                    key={source.id}
-                    onClick={() => handleSelectSource(source)}
-                    disabled={isLoading}
-                    className={`w-full px-2 py-1 rounded text-xs font-medium transition-all duration-300 flex items-center justify-between ${
-                      isSelected
-                        ? 'bg-[#ff0000] text-white'
-                        : isLoading
-                        ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-1">
-                      <span>API {apiNum}</span>
-                      <span className="text-gray-400">•</span>
-                      <span className="text-xs">{getAPIDescription(apiNum)}</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      {isLoading ? (
-                        <div className="animate-spin rounded-full h-3 w-3 border border-white border-t-transparent"></div>
-                      ) : isSelected ? (
-                        <CheckCircle className="h-3 w-3" />
-                      ) : (
-                        <div className={`w-2 h-2 rounded-full ${source.isAdFree ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
-                      )}
-                      <span className="text-xs">{source.quality}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
 
         {/* SmashyStream Card */}
         {smashystreamSources.length > 0 && (
@@ -745,11 +738,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
             onClick={() => smashystreamSources.length > 0 && handleSelectSource(smashystreamSources[0])}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              smashystreamSources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${smashystreamSources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-[#13132B] border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {smashystreamSources.some(s => selectedSource?.id === s.id) && (
@@ -804,11 +796,10 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
             onClick={() => movies111Sources.length > 0 && handleSelectSource(movies111Sources[0])}
-            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-              movies111Sources.some(s => selectedSource?.id === s.id)
-                ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-            }`}
+            className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${movies111Sources.some(s => selectedSource?.id === s.id)
+              ? 'border-[#ff0000] bg-[#ff0000]/10'
+              : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+              }`}
           >
             {/* Active Indicator */}
             {movies111Sources.some(s => selectedSource?.id === s.id) && (
@@ -871,30 +862,28 @@ const StreamSources: React.FC<StreamSourcesProps> = ({ sources, onSourceSelect, 
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: (index + 1) * 0.05 }}
               onClick={() => !isPlaceholder && !isLoading && handleSelectSource(source)}
-              className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${
-                isSelected 
-                  ? 'border-[#ff0000] bg-[#ff0000]/10' 
-                  : isPlaceholder 
-                  ? 'bg-gray-800/50 border-gray-700/50 opacity-60 cursor-not-allowed' 
+              className={`relative rounded-lg p-4 border-2 transition-all duration-300 cursor-pointer ${isSelected
+                ? 'border-[#ff0000] bg-[#ff0000]/10'
+                : isPlaceholder
+                  ? 'bg-gray-800/50 border-gray-700/50 opacity-60 cursor-not-allowed'
                   : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
-              }`}
+                }`}
             >
               {/* Active Indicator */}
               {isSelected && (
                 <div className="absolute top-2 right-2 w-3 h-3 bg-[#ff0000] rounded-full">
                   <div className="w-2 h-2 bg-white rounded-full absolute top-0.5 left-0.5"></div>
-                  </div>
+                </div>
               )}
 
               {/* Service Icon/Branding */}
               <div className="flex flex-col items-center text-center">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2 ${
-                  isBeech ? 'bg-green-500/20' : 
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2 ${isBeech ? 'bg-green-500/20' :
                   isVidFast ? 'bg-cyan-500/20' : 'bg-gray-700'
-                }`}>
+                  }`}>
                   <span className="text-lg">
-                    {isBeech ? '🌳' : 
-                     isVidFast ? '⚡' : getTypeIcon(source.type)}
+                    {isBeech ? '🌳' :
+                      isVidFast ? '⚡' : getTypeIcon(source.type)}
                   </span>
                 </div>
 

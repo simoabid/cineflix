@@ -265,7 +265,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   const hasActiveFilters = Boolean(searchQuery) || Boolean(selectedGenre) || Boolean(selectedYear) || safeSelectedRating > 0;
 
   return (
-    <div className="sticky top-0 z-40 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
+    <div className="sticky top-0 z-40 bg-[#0A0A1F]/95 backdrop-blur-sm border-b border-gray-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-8 py-4">
         {/* Search Bar */}
         <div className="flex items-center gap-4 mb-4">

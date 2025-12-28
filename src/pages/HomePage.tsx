@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  Play, 
-  Info, 
-  Volume2, 
-  VolumeX, 
-  Star, 
-  Calendar, 
-  Clock, 
-  Users, 
-  ChevronLeft, 
+import {
+  Play,
+  Info,
+  Volume2,
+  VolumeX,
+  Star,
+  Calendar,
+  Clock,
+  Users,
+  ChevronLeft,
   ChevronRight,
   Share2,
   Film
 } from 'lucide-react';
-import { 
-  getTrendingMovies, 
-  getPopularMovies, 
-  getTopRatedMovies, 
+import {
+  getTrendingMovies,
+  getPopularMovies,
+  getTopRatedMovies,
   getNowPlayingMovies,
   getMovieDetails,
   getMovieCredits,
@@ -25,114 +25,14 @@ import {
   getPosterUrl,
   getBackdropUrl
 } from '../services/tmdb';
+import LogoImage from '../components/LogoImage';
 import { Movie, MovieCredits } from '../types';
 import AddToListButton from '../components/AddToListButton';
 import LikeButton from '../components/LikeButton';
 import ContentCarousel from '../components/ContentCarousel';
 import GenreCollections from '../components/GenreCollections';
 
-/**
- * Generic API response shape expected from TMDB service functions.
- */
-interface ApiResponse<T> {
-  results?: T[];
-  [key: string]: any;
-}
-
-/**
- * Validate and safely extract results array from a possibly malformed API response.
- * Returns an empty array when the response does not contain a valid results array.
- *
- * Exported for unit testing.
- *
- * @param resp - The raw response object returned from an API call.
- * @returns An array of results typed as T.
- */
-export const validateResults = <T,>(resp: any): T[] => {
-  if (!resp || typeof resp !== 'object') return [];
-  if (!Array.isArray(resp.results)) return [];
-  return resp.results as T[];
-};
-
-/**
- * Extract director name from movie credits in a safe, pure way.
- * Returns 'Unknown' when credits are missing or director not found.
- *
- * Exported for unit testing.
- *
- * @param credits - MovieCredits object from the API.
- * @returns Director name or 'Unknown'.
- */
-export const getDirectorFromCredits = (credits?: MovieCredits | null): string => {
-  if (!credits || !Array.isArray(credits.crew)) return 'Unknown';
-  const director = credits.crew.find(member => member.job === 'Director');
-  return director?.name ?? 'Unknown';
-};
-
-/**
- * Format a numeric vote average to one decimal place.
- * Returns 0 for missing/invalid inputs.
- *
- * Exported for unit testing.
- *
- * @param rating - The raw rating number (0-10 scale).
- * @returns Formatted rating number with one decimal precision.
- */
-export const formatRatingValue = (rating?: number | null): number => {
-  if (rating === null || rating === undefined || Number.isNaN(rating)) return 0;
-  return Math.round(rating * 10) / 10;
-};
-
-/**
- * Convert runtime in minutes to a human readable "Hh Mm" string.
- * Returns empty string for missing or invalid runtimes.
- *
- * Exported for unit testing.
- *
- * @param runtime - Runtime in minutes.
- * @returns Formatted runtime string like "2h 15m" or empty string.
- */
-export const formatRuntimeMinutes = (runtime?: number | null): string => {
-  if (!runtime || typeof runtime !== 'number' || runtime <= 0) return '';
-  const hours = Math.floor(runtime / 60);
-  const minutes = runtime % 60;
-  return `${hours}h ${minutes}m`;
-};
-
-/**
- * Build a ContentCarousel section with optional wrapper classes.
- * Returns null when items are missing or empty.
- *
- * @param title - Title to display above the carousel.
- * @param items - Array of Movie items to pass to ContentCarousel.
- * @param type - Content type (default 'movie').
- * @param extraClass - Optional wrapper className to apply.
- * @returns JSX element or null.
- */
-const buildCarouselSection = (
-  title: string,
-  items?: Movie[] | null,
-  type: 'movie' | 'tv' = 'movie',
-  extraClass?: string
-): JSX.Element | null => {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <div className={extraClass ?? ''}>
-      <ContentCarousel
-        title={title}
-        items={items}
-        type={type}
-      />
-    </div>
-  );
-};
-
-/**
- * HomePage component - renders the hero banner and multiple content carousels.
- *
- * No props are accepted for this route-level component.
- */
-const HomePage: React.FC = () => {
+const HomePage = (): JSX.Element => {
   const [heroMovies, setHeroMovies] = useState<Movie[]>([]);
   const [currentHeroIndex, setCurrentHeroIndex] = useState(0);
   const [heroMovie, setHeroMovie] = useState<Movie | null>(null);
@@ -145,136 +45,42 @@ const HomePage: React.FC = () => {
   const [isMuted, setIsMuted] = useState(true);
   const [isHeroAutoPlaying, setIsHeroAutoPlaying] = useState(true);
 
-  /**
-   * Memoized director derived from hero credits to avoid repeated scans.
-   */
-  const memoizedDirector = useMemo(() => {
-    return getDirectorFromCredits(heroCredits);
-  }, [heroCredits]);
 
-  /**
-   * Wrapper that uses the pure director helper with component state.
-   * Kept as the same name to avoid changing existing references.
-   */
-  const getDirector = () => {
-    return memoizedDirector;
-  };
-
-  /**
-   * Memoized runtime string for the current hero movie.
-   */
-  const memoizedRuntime = useMemo(() => {
-    return formatRuntimeMinutes(heroMovie?.runtime ?? null);
-  }, [heroMovie?.runtime]);
-
-  /**
-   * Wrapper that uses the pure runtime formatter.
-   * Kept as the same name to avoid changing existing references.
-   *
-   * @returns Formatted runtime string or empty string.
-   */
-  const getRuntime = () => {
-    return memoizedRuntime;
-  };
-
-  /**
-   * Memoized release year derived safely from remote data.
-   */
-  const memoizedReleaseYear = useMemo(() => {
-    if (!heroMovie?.release_date) return '';
-    const date = new Date(heroMovie.release_date);
-    const year = Number.isNaN(date.getFullYear()) ? '' : date.getFullYear();
-    return year;
-  }, [heroMovie?.release_date]);
-
-  /**
-   * Wrapper for formatting ratings. Kept as a stable function reference.
-   *
-   * @param rating - Raw rating number.
-   * @returns Formatted rating number.
-   */
-  const formatRating = useCallback((rating: number) => {
-    return formatRatingValue(rating);
-  }, []);
-
-  /**
-   * Memoized hero asset URLs with defensive fallbacks to avoid broken images.
-   */
-  const heroBackdropUrl = useMemo(() => {
-    if (!heroMovie) return '/fallback-backdrop.jpg';
-    // Prefer backdrop, fallback to poster or generic fallback
-    const backdrop = heroMovie.backdrop_path ? getBackdropUrl(heroMovie.backdrop_path, 'original') : null;
-    if (backdrop) return backdrop;
-    if (heroMovie.poster_path) return getImageUrl(heroMovie.poster_path, 'original');
-    return '/fallback-backdrop.jpg';
-  }, [heroMovie?.backdrop_path, heroMovie?.poster_path, heroMovie?.id]);
-
-  const heroPosterUrl = useMemo(() => {
-    if (!heroMovie) return '/fallback-poster.jpg';
-    if (heroMovie.poster_path) return getPosterUrl(heroMovie.poster_path, 'w500');
-    if (heroMovie.backdrop_path) return getImageUrl(heroMovie.backdrop_path, 'w500');
-    return '/fallback-poster.jpg';
-  }, [heroMovie?.poster_path, heroMovie?.backdrop_path, heroMovie?.id]);
-
-  /**
-   * Fetch and initialize data for the homepage: hero rotation and carousels.
-   * Centralizes response validation and handles missing data gracefully.
-   *
-   * Exported signature is not required but the function is typed for clarity and testing.
-   */
   useEffect(() => {
-    const fetchData = async (): Promise<void> => {
+    const fetchData = async () => {
       try {
         setLoading(true);
-        
+
         // Fetch trending movies for hero rotation
         const trendingResponse = await getTrendingMovies();
-        const trendingResults = validateResults<Movie>(trendingResponse);
-
-        if (trendingResults.length > 0) {
-          const heroMoviesList = trendingResults.slice(0, 5); // Use top 5 for hero rotation
+        if (trendingResponse.results.length > 0) {
+          const heroMoviesList = trendingResponse.results.slice(0, 12); // Use top 12 for hero rotation
           setHeroMovies(heroMoviesList);
-          
+
           // Fetch detailed info for the first hero movie
           const firstHeroMovie = heroMoviesList[0];
-          try {
-            const [movieDetails, movieCredits] = await Promise.all([
-              getMovieDetails(firstHeroMovie.id),
-              getMovieCredits(firstHeroMovie.id)
-            ]);
-            setHeroMovie(movieDetails);
-            setHeroCredits(movieCredits);
-          } catch (err) {
-            console.error('Error fetching first hero movie details:', err);
-            setHeroMovie(null);
-            setHeroCredits(null);
-          }
-          setTrendingMovies(trendingResults.slice(5, 25)); // Use remaining for carousel
-        } else {
-          // Ensure state is set to safe defaults when API returns no trending results
-          setHeroMovies([]);
-          setHeroMovie(null);
-          setHeroCredits(null);
-          setTrendingMovies([]);
+          const [movieDetails, movieCredits] = await Promise.all([
+            getMovieDetails(firstHeroMovie.id),
+            getMovieCredits(firstHeroMovie.id)
+          ]);
+
+          setHeroMovie(movieDetails);
+          setHeroCredits(movieCredits);
+          setTrendingMovies(trendingResponse.results.slice(5, 20)); // Use original slice for carousel (15 movies like original)
         }
 
-        // Fetch other categories in parallel and validate responses
+        // Fetch other categories
         const [popularResponse, topRatedResponse, nowPlayingResponse] = await Promise.all([
           getPopularMovies(),
           getTopRatedMovies(),
           getNowPlayingMovies(),
         ]);
 
-        const popularResults = validateResults<Movie>(popularResponse);
-        const topRatedResults = validateResults<Movie>(topRatedResponse);
-        const nowPlayingResults = validateResults<Movie>(nowPlayingResponse);
-
-        setPopularMovies(popularResults.slice(0, 20));
-        setTopRatedMovies(topRatedResults.slice(0, 20));
-        setNowPlayingMovies(nowPlayingResults.slice(0, 20));
+        setPopularMovies(popularResponse.results.slice(0, 20));
+        setTopRatedMovies(topRatedResponse.results.slice(0, 20));
+        setNowPlayingMovies(nowPlayingResponse.results.slice(0, 20));
       } catch (error) {
         console.error('Error fetching data:', error);
-        // Keep existing state where possible; set loading to false in finally
       } finally {
         setLoading(false);
       }
@@ -288,14 +94,14 @@ const HomePage: React.FC = () => {
     if (isHeroAutoPlaying && heroMovies.length > 1) {
       const interval = setInterval(() => {
         setCurrentHeroIndex((prevIndex) => (prevIndex + 1) % heroMovies.length);
-      }, 8000); // Change every 8 seconds
+      }, 10000); // Change every 10 seconds (increased for more movies)
       return () => clearInterval(interval);
     }
   }, [isHeroAutoPlaying, heroMovies.length]);
 
   // Update hero movie when index changes
   useEffect(() => {
-    const updateHeroMovie = async (): Promise<void> => {
+    const updateHeroMovie = async () => {
       if (heroMovies.length > 0 && heroMovies[currentHeroIndex]) {
         try {
           const [movieDetails, movieCredits] = await Promise.all([
@@ -306,7 +112,6 @@ const HomePage: React.FC = () => {
           setHeroCredits(movieCredits);
         } catch (error) {
           console.error('Error fetching hero movie details:', error);
-          // Do not clear heroMovie here to avoid flicker; keep existing heroMovie if fetch fails
         }
       }
     };
@@ -314,68 +119,100 @@ const HomePage: React.FC = () => {
     updateHeroMovie();
   }, [currentHeroIndex, heroMovies]);
 
+  // Helper functions
+  const getDirector = () => {
+    if (!heroCredits) return 'Unknown';
+    const director = heroCredits.crew.find(member => member.job === 'Director');
+    return director ? director.name : 'Unknown';
+  };
+
+  const formatRating = (rating: number) => {
+    return Math.round(rating * 10) / 10;
+  };
+
+  const getRuntime = () => {
+    if (!heroMovie?.runtime) return '';
+    const hours = Math.floor(heroMovie.runtime / 60);
+    const minutes = heroMovie.runtime % 60;
+    return `${hours}h ${minutes}m`;
+  };
+
   const nextHero = () => {
-    if (heroMovies.length === 0) return;
     setCurrentHeroIndex((prevIndex) => (prevIndex + 1) % heroMovies.length);
     setIsHeroAutoPlaying(false);
   };
 
   const prevHero = () => {
-    if (heroMovies.length === 0) return;
     setCurrentHeroIndex((prevIndex) => (prevIndex - 1 + heroMovies.length) % heroMovies.length);
     setIsHeroAutoPlaying(false);
   };
 
   const goToHero = (index: number) => {
-    if (heroMovies.length === 0) return;
     setCurrentHeroIndex(index);
     setIsHeroAutoPlaying(false);
   };
 
   const handleShare = () => {
-    if (!heroMovie) return;
-    if (navigator.share) {
+    if (navigator.share && heroMovie) {
       navigator.share({
         title: heroMovie.title,
         text: heroMovie.overview,
         url: `${window.location.origin}/movie/${heroMovie.id}`,
       });
-    } else {
-      navigator.clipboard?.writeText(`${window.location.origin}/movie/${heroMovie.id}`);
+    } else if (heroMovie) {
+      navigator.clipboard.writeText(`${window.location.origin}/movie/${heroMovie.id}`);
     }
   };
 
+
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-netflix-black flex items-center justify-center">
+      <div className="min-h-screen bg-[#020205] bg-gradient-to-b from-black/80 via-[#050510] to-[#0A0A1F] flex items-center justify-center">
         <div className="relative">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-netflix-red"></div>
-          <div className="absolute inset-0 animate-ping rounded-full h-32 w-32 border border-netflix-red/30"></div>
+          {/* Main thick spinner */}
+          <div className="h-32 w-32 netflix-spinner-thick" />
+
+          {/* Ripple effects */}
+          <div className="h-32 w-32 netflix-ripple" />
+          <div className="h-32 w-32 netflix-ripple" style={{ animationDelay: '0.5s' }} />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-netflix-black">
+    <div className="min-h-screen bg-[#020205] bg-gradient-to-b from-black/80 via-[#050510] to-[#0A0A1F]">
       {/* Enhanced Hero Section */}
       {heroMovie && (
-        <div 
+        <div
           className="relative h-screen"
           onMouseEnter={() => setIsHeroAutoPlaying(false)}
           onMouseLeave={() => setIsHeroAutoPlaying(true)}
         >
-          {/* Background Image */}
+          {/* Background Image - Responsive: Vertical poster for mobile/tablet, horizontal backdrop for desktop */}
           <div className="absolute inset-0">
+            {/* Mobile/Tablet: Vertical Poster */}
             <img
-              src={heroBackdropUrl}
+              src={getPosterUrl(heroMovie.poster_path, 'w780')}
               alt={heroMovie.title}
-              className="w-full h-full object-cover transition-all duration-1000"
+              className="lg:hidden w-full h-full object-cover transition-all duration-1000"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = heroMovie?.poster_path ? getImageUrl(heroMovie.poster_path, 'original') : '/fallback-backdrop.jpg';
+                (e.target as HTMLImageElement).src = '/fallback-poster.jpg';
               }}
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-transparent"></div>
+            {/* Desktop: Horizontal Backdrop */}
+            <img
+              src={getBackdropUrl(heroMovie.backdrop_path, 'original')}
+              alt={heroMovie.title}
+              className="hidden lg:block w-full h-full object-cover transition-all duration-1000"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = getImageUrl(heroMovie.poster_path, 'original');
+              }}
+            />
+            {/* Left-to-right gradient - Reduced for mobile/tablet */}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/40 sm:from-black/60 md:from-black/80 lg:from-black via-black/20 sm:via-black/40 md:via-black/60 lg:via-black/80 to-transparent"></div>
+            {/* Bottom-to-top gradient */}
             <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
           </div>
 
@@ -384,28 +221,28 @@ const HomePage: React.FC = () => {
             <>
               <button
                 onClick={prevHero}
-                className="absolute left-8 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/80 backdrop-blur-sm p-3 rounded-full transition-all duration-300 border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
+                className="absolute left-2 sm:left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/80 backdrop-blur-sm p-2 sm:p-3 rounded-full transition-all duration-300 border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
               >
-                <ChevronLeft className="w-6 h-6 text-white" />
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" />
               </button>
-              
+
               <button
                 onClick={nextHero}
-                className="absolute right-8 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/80 backdrop-blur-sm p-3 rounded-full transition-all duration-300 border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
+                className="absolute right-2 sm:right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/80 backdrop-blur-sm p-2 sm:p-3 rounded-full transition-all duration-300 border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
               >
-                <ChevronRight className="w-6 h-6 text-white" />
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" />
               </button>
             </>
           )}
 
           {/* Hero Content */}
-          <div className="relative z-10 h-full flex items-center justify-start">
-            <div className="max-w-6xl ml-8 lg:ml-16 px-4 lg:px-8 grid grid-cols-1 lg:grid-cols-4 gap-8 lg:gap-12 items-center">
-              {/* Movie Poster */}
-              <div className="lg:col-span-1 flex justify-start">
+          <div className="relative z-10 h-full flex items-end md:items-center justify-start">
+            <div className="max-w-6xl ml-4 md:ml-8 lg:ml-16 px-4 lg:px-8 pb-20 sm:pb-6 md:pb-0 grid grid-cols-1 lg:grid-cols-4 gap-8 lg:gap-12 items-center">
+              {/* Movie Poster - Hidden on mobile and small screens */}
+              <div className="hidden lg:flex lg:col-span-1 justify-start">
                 <div className="max-w-xs lg:max-w-none">
                   <img
-                    src={heroPosterUrl}
+                    src={getPosterUrl(heroMovie.poster_path, 'w500')}
                     alt={heroMovie.title}
                     className="w-56 lg:w-full rounded-xl shadow-2xl border-4 border-white/10 hover:scale-105 transition-transform duration-300"
                     onError={(e) => {
@@ -415,40 +252,50 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Movie Info */}
-              <div className="lg:col-span-3 space-y-5 lg:pl-8 text-left">
-                {/* Title */}
+              {/* Movie Info - Full width on mobile, 3/4 width on desktop */}
+              <div className="col-span-1 lg:col-span-3 space-y-3 md:space-y-5 lg:pl-8 text-left">
+                {/* Title with Logo */}
                 <div>
-                  <h1 className="text-4xl lg:text-6xl xl:text-7xl font-bold mb-4 leading-tight">
-                    {heroMovie.title}
-                  </h1>
+                  <div className="mb-2 md:mb-4">
+                    <LogoImage
+                      logoPath={heroMovie.logo_path}
+                      title={heroMovie.title}
+                      size="xl"
+                      className="justify-start"
+                      textClassName="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold leading-tight"
+                      maxHeight="max-h-20 md:max-h-28 lg:max-h-32"
+                      contentId={heroMovie.id}
+                      contentType="movie"
+                      enableOnDemandFetch={true}
+                    />
+                  </div>
                   {heroMovie.tagline && (
-                    <p className="text-lg lg:text-xl text-gray-300 italic">
+                    <p className="text-base md:text-lg lg:text-xl text-gray-300 italic">
                       "{heroMovie.tagline}"
                     </p>
                   )}
                 </div>
 
                 {/* Enhanced Metadata */}
-                <div className="flex flex-wrap items-center justify-start gap-4 lg:gap-6 text-sm lg:text-base">
-                  <div className="flex items-center gap-2">
-                    <Star className="w-4 h-4 lg:w-5 lg:h-5 text-yellow-400 fill-current" />
+                <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-4 lg:gap-6 text-xs sm:text-sm lg:text-base">
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <Star className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-yellow-400 fill-current" />
                     <span className="font-semibold">{formatRating(heroMovie.vote_average)}</span>
-                    <span className="text-gray-400">({heroMovie.vote_count?.toLocaleString()} votes)</span>
+                    <span className="text-gray-400 hidden sm:inline">({heroMovie.vote_count?.toLocaleString()} votes)</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 lg:w-5 lg:h-5 text-gray-400" />
-                    <span>{memoizedReleaseYear}</span>
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <Calendar className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-gray-400" />
+                    <span>{new Date(heroMovie.release_date).getFullYear()}</span>
                   </div>
                   {getRuntime() && (
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 lg:w-5 lg:h-5 text-gray-400" />
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <Clock className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-gray-400" />
                       <span>{getRuntime()}</span>
                     </div>
                   )}
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 lg:w-5 lg:h-5 text-gray-400" />
-                    <span>{getDirector()}</span>
+                  <div className="flex items-center gap-1 sm:gap-2 hidden md:flex">
+                    <Users className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-gray-400" />
+                    <span className="truncate max-w-32">{getDirector()}</span>
                   </div>
                 </div>
 
@@ -465,69 +312,70 @@ const HomePage: React.FC = () => {
                 </div>
 
                 {/* Enhanced Action Buttons */}
-                <div className="space-y-4">
+                <div className="space-y-3 md:space-y-4">
                   {/* Primary Actions */}
-                  <div className="flex flex-wrap justify-start gap-4">
+                  <div className="flex flex-col sm:flex-row justify-start gap-3 sm:gap-4">
                     <Link
                       to={`/movie/${heroMovie.id}`}
-                      className="flex items-center gap-3 bg-netflix-red hover:bg-netflix-red/80 px-8 py-3 rounded-xl font-bold text-lg transition-all duration-300 shadow-xl hover:scale-105"
+                      className="flex items-center justify-center gap-2 sm:gap-3 bg-netflix-red hover:bg-netflix-red/80 px-6 sm:px-8 py-3 rounded-xl font-bold text-base sm:text-lg transition-all duration-300 shadow-xl hover:scale-105 w-full sm:w-auto"
                     >
-                      <Play className="w-6 h-6 fill-current" />
+                      <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
                       <span>Watch Now</span>
                     </Link>
-                    
+
                     <Link
                       to={`/movie/${heroMovie.id}`}
-                      className="flex items-center gap-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-8 py-3 rounded-xl font-semibold text-lg transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
+                      className="flex items-center justify-center gap-2 sm:gap-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-6 sm:px-8 py-3 rounded-xl font-semibold text-base sm:text-lg transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105 w-full sm:w-auto"
                     >
-                      <Info className="w-6 h-6" />
+                      <Info className="w-5 h-5 sm:w-6 sm:h-6" />
                       <span>More Info</span>
                     </Link>
                   </div>
-                  
+
                   {/* Secondary Actions */}
-                  <div className="flex flex-wrap justify-start gap-3">
+                  <div className="flex flex-wrap justify-start gap-2 sm:gap-3 mb-16 sm:mb-0">
                     <AddToListButton
                       content={heroMovie}
                       contentType="movie"
                       variant="button"
                       showText={true}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-6 py-2.5 rounded-lg font-medium text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
+                      className="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
                     />
-                    
-                    <LikeButton 
-                      content={heroMovie} 
+
+                    <LikeButton
+                      content={heroMovie}
                       contentType="movie"
                       variant="button"
                       showText={true}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-6 py-2.5 rounded-lg font-medium text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
+                      className="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
                     />
-                    
-                    <button 
+
+                    <button
                       onClick={handleShare}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-6 py-2.5 rounded-lg font-medium text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
+                      className="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-300 border border-white/20 hover:border-white/40 shadow-lg hover:scale-105"
                     >
-                      <Share2 className="w-5 h-5" />
+                      <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
                       <span>Share</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Additional Quick Actions */}
-                <div className="flex items-center justify-start space-x-4 pt-2">
-                  <button 
+                <div className="hidden sm:flex items-center justify-start space-x-3 sm:space-x-4 pt-2">
+                  <button
                     onClick={() => setIsMuted(!isMuted)}
-                    className="w-10 h-10 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-gray-600/50 transition-all duration-300 group border border-white/20 hover:border-white/40"
+                    className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-gray-600/50 transition-all duration-300 group border border-white/20 hover:border-white/40"
                   >
                     {isMuted ? (
-                      <VolumeX className="w-4 h-4 text-white" />
+                      <VolumeX className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     ) : (
-                      <Volume2 className="w-4 h-4 text-white" />
+                      <Volume2 className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                     )}
                   </button>
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-1 sm:gap-2 text-xs text-gray-400">
                     <Film className="w-3 h-3" />
-                    <span>Featured Movie</span>
+                    <span className="hidden sm:inline">Featured Movie</span>
+                    <span className="sm:hidden">Featured</span>
                   </div>
                 </div>
               </div>
@@ -536,43 +384,80 @@ const HomePage: React.FC = () => {
 
           {/* Hero Navigation Dots */}
           {heroMovies.length > 1 && (
-            <div className="absolute bottom-12 left-8 lg:left-16 flex gap-3 z-20">
-              {heroMovies.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => goToHero(index)}
-                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                    index === currentHeroIndex 
-                      ? 'bg-netflix-red scale-125' 
+            <div className="absolute bottom-2 sm:bottom-6 md:bottom-24 lg:bottom-28 xl:bottom-32 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2 rounded-full bg-black/40 backdrop-blur-sm px-2 sm:px-3 py-1.5 sm:py-2 border border-white/10">
+                {heroMovies.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => goToHero(index)}
+                    aria-label={`Go to featured movie ${index + 1}`}
+                    aria-current={index === currentHeroIndex}
+                    className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-white/50 ${index === currentHeroIndex
+                      ? 'bg-netflix-red scale-110 ring-2 ring-netflix-red/40'
                       : 'bg-white/50 hover:bg-white/70'
-                  }`}
-                  aria-label={`Go to featured movie ${index + 1}`}
-                />
-              ))}
+                      }`}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
       )}
 
       {/* Content Carousels */}
-      <div className="relative -mt-32 z-10">
-        <div className="space-y-12 pb-8">
-          {buildCarouselSection("🔥 Trending Now", trendingMovies, 'movie')}
-          
-          {buildCarouselSection("⭐ Popular on CineFlix", popularMovies, 'movie')}
-          
-          {buildCarouselSection("🏆 Top Rated", topRatedMovies, 'movie', '-mt-32')}
-          
-          {buildCarouselSection("🎬 Now Playing", nowPlayingMovies, 'movie', '-mt-32')}
+      <div className="relative mt-8 sm:mt-12 md:-mt-32 z-10">
+        <div className="space-y-6 pb-6">
+          {trendingMovies.length > 0 && (
+            <div className="animate-fade-in-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
+              <ContentCarousel
+                title="🔥 Trending Now"
+                items={trendingMovies}
+                type="movie"
+              />
+            </div>
+          )}
 
-          {/* Genre Collections */}
-          <div className="-mt-32">
+          {popularMovies.length > 0 && (
+            <div className="animate-fade-in-up" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
+              <ContentCarousel
+                title="⭐ Popular on CineFlix"
+                items={popularMovies}
+                type="movie"
+              />
+            </div>
+          )}
+
+          {topRatedMovies.length > 0 && (
+            <div className="-mt-32 animate-fade-in-up" style={{ animationDelay: '0.6s', animationFillMode: 'both' }}>
+              <ContentCarousel
+                title="🏆 Top Rated"
+                items={topRatedMovies}
+                type="movie"
+              />
+            </div>
+          )}
+
+          {nowPlayingMovies.length > 0 && (
+            <div className="-mt-32 animate-fade-in-up" style={{ animationDelay: '0.8s', animationFillMode: 'both' }}>
+              <ContentCarousel
+                title="🎬 Now Playing"
+                items={nowPlayingMovies}
+                type="movie"
+              />
+            </div>
+          )}
+
+          {/* Genre Collections - Now available on Browse page */}
+          {/* Commented out to avoid duplication - can be restored if needed */}
+          {/* 
+          <div className="-mt-32 animate-fade-in-up" style={{ animationDelay: '1.0s', animationFillMode: 'both' }}>
             <GenreCollections />
           </div>
+          */}
         </div>
       </div>
     </div>
   );
 };
 
-export default HomePage;
+export { HomePage as default };

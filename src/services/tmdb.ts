@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Movie, TVShow, Video, ApiResponse, Content, Genre, ImageConfig, Collection, CollectionDetails, CollectionType, CollectionStatus, MovieCredits, PersonDetails, PersonMovieCredits, ExternalIds } from '../types';
 
-const API_KEY = '7b28648bb27efe6ee3ce7c316c535d8b'; // Replace with your actual TMDB API key
+const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
 
@@ -31,8 +31,8 @@ class ControlledApiError extends Error {
 const DEFAULT_TIMEOUT = 8000;
 // Merge safe defaults into axios instance
 tmdbApi.defaults.timeout = DEFAULT_TIMEOUT;
-tmdbApi.defaults.headers = {
-  ...(tmdbApi.defaults.headers || {}),
+tmdbApi.defaults.headers.common = {
+  ...(tmdbApi.defaults.headers.common || {}),
   Accept: 'application/json',
 };
 
@@ -99,30 +99,93 @@ const shouldRetry = (err: any): boolean => {
   return false;
 };
 
-// Preserve original get for potential future use
-const originalGet = tmdbApi.get.bind(tmdbApi);
+// Request Cache Implementation
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+class RequestCache {
+  private cache = new Map<string, CacheEntry<any>>();
+  private TTL = 5 * 60 * 1000; // 5 minutes default
+  private MAX_ENTRIES = 100; // Prevent memory bloat
+
+  constructor(ttl: number = 5 * 60 * 1000) {
+    this.TTL = ttl;
+  }
+
+  get(key: string): any | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+
+    if (Date.now() - entry.timestamp > this.TTL) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return entry.data;
+  }
+
+  set(key: string, data: any): void {
+    // Evict oldest if cache is full
+    if (this.cache.size >= this.MAX_ENTRIES) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const apiCache = new RequestCache();
+
+export const clearApiCache = () => apiCache.clear();
 
 // Override tmdbApi.get with a guarded implementation
-tmdbApi.get = async (url: string, config: AnyObject = {}) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+tmdbApi.get = async (url: string, config: AnyObject = {}): Promise<any> => {
   const safePath = sanitizePath(url);
   const safeParams = sanitizeParams(config?.params);
+
+  // Create a unique cache key based on URL and params
+  const queryString = new URLSearchParams(safeParams as any).toString();
+  const cacheKey = `${safePath}?${queryString}`;
+
+  // Check cache for GET requests
+  const cachedResponse = apiCache.get(cacheKey);
+  if (cachedResponse) {
+    // Return a deep copy to prevent mutation of cached data
+    return JSON.parse(JSON.stringify(cachedResponse));
+  }
+
   const mergedParams = { ...(tmdbApi.defaults.params || {}), ...safeParams };
   const mergedConfig: AnyObject = {
     ...config,
     params: mergedParams,
     timeout: config?.timeout || DEFAULT_TIMEOUT,
-    headers: { ...(tmdbApi.defaults.headers || {}), ...(config?.headers || {}) }
+    headers: { ...(tmdbApi.defaults.headers.common || {}), ...(config?.headers || {}) }
   };
 
-  let lastErr: any = null;
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const fullUrl = `${BASE_URL}${safePath}`;
       const response = await axios.get(fullUrl, mergedConfig);
+
+      // Cache the success response
+      if (response.status === 200) {
+        apiCache.set(cacheKey, response);
+      }
+
       return response;
     } catch (err: any) {
-      lastErr = err;
       if (attempt < maxAttempts && shouldRetry(err)) {
         await delay(200 * attempt);
         continue;
@@ -189,7 +252,7 @@ const isCacheValid = (timestamp: number): boolean => {
 
 export const getImageConfig = async (): Promise<ImageConfig> => {
   if (imageConfig) return imageConfig;
-  
+
   try {
     const response = await tmdbApi.get('/configuration');
     const config = response.data.images;
@@ -232,6 +295,11 @@ export const getBackdropUrl = (path: string | null, size: string = 'w1280'): str
   return `${IMAGE_BASE_URL}/${size}${path}`;
 };
 
+export const getLogoUrl = (path: string | null, size: string = 'w300'): string => {
+  if (!path) return '';
+  return `${IMAGE_BASE_URL}/${size}${path}`;
+};
+
 // Movies
 export const getTrendingMovies = async (page: number = 1): Promise<ApiResponse<Movie>> => {
   const response = await tmdbApi.get('/trending/movie/week', {
@@ -270,7 +338,36 @@ export const getUpcomingMovies = async (page: number = 1): Promise<ApiResponse<M
 
 export const getMovieDetails = async (id: number): Promise<Movie> => {
   const response = await tmdbApi.get(`/movie/${id}`);
-  return response.data;
+  const movie = response.data;
+
+  // Check cache first
+  const { logoCache } = await import('./logoCache');
+  const cachedLogo = logoCache.getLogo(id, 'movie');
+
+  if (cachedLogo) {
+    movie.logo_path = cachedLogo.logoPath;
+    return movie;
+  }
+
+  // Fetch logos from images endpoint if not cached
+  try {
+    const imagesResponse = await tmdbApi.get(`/movie/${id}/images`);
+    const logos = imagesResponse.data.logos;
+    if (logos && logos.length > 0) {
+      // Prefer English logos, or fallback to first available
+      const englishLogo = logos.find((logo: any) => logo.iso_639_1 === 'en' || logo.iso_639_1 === null);
+      movie.logo_path = englishLogo ? englishLogo.file_path : logos[0].file_path;
+      logoCache.setLogo(id, 'movie', movie.logo_path);
+    } else {
+      logoCache.setLogo(id, 'movie', null);
+    }
+  } catch (error) {
+    // Logo fetching failed, cache the failure
+    console.warn(`Failed to fetch logos for movie ${id}:`, error);
+    logoCache.setLogo(id, 'movie', null, true);
+  }
+
+  return movie;
 };
 
 export const getMovieExternalIds = async (id: number): Promise<ExternalIds> => {
@@ -397,37 +494,37 @@ export const getEnhancedSimilarMovies = async (movie: Movie, page: number = 1): 
     ];
 
     // Remove duplicates and sort by relevance score
-    const uniqueMovies = allMovies.filter((movie, index, self) => 
+    const uniqueMovies = allMovies.filter((movie, index, self) =>
       index === self.findIndex(m => m.id === movie.id)
     );
 
     // Calculate relevance score based on multiple factors
     const scoredMovies = uniqueMovies.map(m => {
       let score = 0;
-      
+
       // Base score from TMDB's similarity algorithm
       if (similar.find((s: any) => s.id === m.id)) score += 50;
       if (recommendations.find((r: any) => r.id === m.id)) score += 40;
-      
+
       // Genre similarity
-      const commonGenres = movie.genres?.filter(g => 
+      const commonGenres = movie.genres?.filter(g =>
         m.genres?.some((mg: any) => mg.id === g.id)
       ).length || 0;
       score += commonGenres * 10;
-      
+
       // Rating similarity
       const ratingDiff = Math.abs((movie.vote_average || 0) - (m.vote_average || 0));
       score += Math.max(0, 20 - ratingDiff * 2);
-      
+
       // Year similarity (prefer movies from similar time periods)
       const movieYear = new Date(movie.release_date).getFullYear();
       const mYear = new Date(m.release_date).getFullYear();
       const yearDiff = Math.abs(movieYear - mYear);
       score += Math.max(0, 15 - yearDiff);
-      
+
       // Popularity bonus
       score += Math.min(20, (m.popularity || 0) / 10);
-      
+
       return { ...m, relevanceScore: score };
     });
 
@@ -469,7 +566,7 @@ export const getMoviesByKeywords = async (keywords: string[]): Promise<Movie[]> 
     }
 
     // Remove duplicates and return
-    return keywordMovies.filter((movie, index, self) => 
+    return keywordMovies.filter((movie, index, self) =>
       index === self.findIndex(m => m.id === movie.id)
     );
   } catch (error) {
@@ -527,7 +624,36 @@ export const getAiringTodayTVShows = async (page: number = 1): Promise<ApiRespon
 
 export const getTVShowDetails = async (id: number): Promise<TVShow> => {
   const response = await tmdbApi.get(`/tv/${id}`);
-  return response.data;
+  const tvShow = response.data;
+
+  // Check cache first
+  const { logoCache } = await import('./logoCache');
+  const cachedLogo = logoCache.getLogo(id, 'tv');
+
+  if (cachedLogo) {
+    tvShow.logo_path = cachedLogo.logoPath;
+    return tvShow;
+  }
+
+  // Fetch logos from images endpoint if not cached
+  try {
+    const imagesResponse = await tmdbApi.get(`/tv/${id}/images`);
+    const logos = imagesResponse.data.logos;
+    if (logos && logos.length > 0) {
+      // Prefer English logos, or fallback to first available
+      const englishLogo = logos.find((logo: any) => logo.iso_639_1 === 'en' || logo.iso_639_1 === null);
+      tvShow.logo_path = englishLogo ? englishLogo.file_path : logos[0].file_path;
+      logoCache.setLogo(id, 'tv', tvShow.logo_path);
+    } else {
+      logoCache.setLogo(id, 'tv', null);
+    }
+  } catch (error) {
+    // Logo fetching failed, cache the failure
+    console.warn(`Failed to fetch logos for TV show ${id}:`, error);
+    logoCache.setLogo(id, 'tv', null, true);
+  }
+
+  return tvShow;
 };
 
 export const getTVShowExternalIds = async (id: number): Promise<ExternalIds> => {
@@ -573,7 +699,7 @@ export const getEnhancedSimilarTVShows = async (tvShow: TVShow, page: number = 1
 
     // Combine and deduplicate results
     const combined = [...similar, ...recommendations];
-    const unique = combined.filter((show, index, self) => 
+    const unique = combined.filter((show, index, self) =>
       index === self.findIndex(s => s.id === show.id)
     );
 
@@ -589,10 +715,10 @@ export const getEnhancedSimilarTVShows = async (tvShow: TVShow, page: number = 1
             'vote_count.gte': 100 // Only shows with decent ratings
           }
         });
-        
+
         const genreShows = genreResponse.data.results || [];
         // Add genre-based shows, avoiding duplicates
-        genreShows.forEach(show => {
+        genreShows.forEach((show: TVShow) => {
           if (!unique.find(s => s.id === show.id)) {
             unique.push(show);
           }
@@ -607,17 +733,17 @@ export const getEnhancedSimilarTVShows = async (tvShow: TVShow, page: number = 1
       .filter(show => show.id !== tvShow.id) // Exclude the original show
       .sort((a, b) => {
         // Prioritize shows with similar genres
-        const aGenreMatch = tvShow.genres?.some(g => 
+        const aGenreMatch = tvShow.genres?.some(g =>
           a.genre_ids?.includes(g.id)
         ) ? 1 : 0;
-        const bGenreMatch = tvShow.genres?.some(g => 
+        const bGenreMatch = tvShow.genres?.some(g =>
           b.genre_ids?.includes(g.id)
         ) ? 1 : 0;
-        
+
         if (aGenreMatch !== bGenreMatch) {
           return bGenreMatch - aGenreMatch;
         }
-        
+
         // Then sort by popularity
         return b.vote_count - a.vote_count;
       })
@@ -647,12 +773,12 @@ export const getTVShowsByKeywords = async (keywords: string[]): Promise<TVShow[]
 
     const responses = await Promise.all(keywordPromises);
     const allResults = responses.flatMap(response => response.data.results || []);
-    
+
     // Remove duplicates and sort by popularity
-    const unique = allResults.filter((show, index, self) => 
+    const unique = allResults.filter((show, index, self) =>
       index === self.findIndex(s => s.id === show.id)
     );
-    
+
     return unique
       .sort((a, b) => b.vote_count - a.vote_count)
       .slice(0, 15);
@@ -716,7 +842,7 @@ export const getCollectionDetails = async (collectionId: number): Promise<Collec
   try {
     const response = await tmdbApi.get(`/collection/${collectionId}`);
     const collection = response.data;
-    
+
     // Get additional movie details for runtime calculation
     const filmsWithDetails = await Promise.all(
       collection.parts.map(async (movie: Movie) => {
@@ -728,18 +854,18 @@ export const getCollectionDetails = async (collectionId: number): Promise<Collec
         }
       })
     );
-    
+
     const totalRuntime = filmsWithDetails.reduce((total, movie) => {
       return total + (movie.runtime || 0);
     }, 0);
-    
-    const sortedFilms = filmsWithDetails.sort((a, b) => 
+
+    const sortedFilms = filmsWithDetails.sort((a, b) =>
       new Date(a.release_date || '').getTime() - new Date(b.release_date || '').getTime()
     );
-    
+
     const firstReleaseDate = sortedFilms[0]?.release_date || '';
     const latestReleaseDate = sortedFilms[sortedFilms.length - 1]?.release_date || '';
-    
+
     return {
       ...collection,
       parts: sortedFilms,
@@ -793,12 +919,12 @@ export const discoverAllCollections = async (
   if (forceRefresh) {
     clearCollectionsCache();
   }
-  
+
   try {
     console.log('🚀 Starting lightning-fast collection discovery from TMDB...');
     const discoveredCollections = new Map<number, CollectionDetails>();
     let totalMoviesScanned = 0;
-    
+
     const updateProgress = (step: string) => {
       discoveryCache.discoveryProgress = {
         moviesScanned: totalMoviesScanned,
@@ -845,15 +971,15 @@ export const discoverAllCollections = async (
     // Update cache
     discoveryCache.collections = allCollections;
     discoveryCache.lastFetched = Date.now();
-    
+
     updateProgress(`✅ Lightning discovery complete! Found ${allCollections.length} collections`);
     console.log(`🎉 Successfully discovered ${allCollections.length} collections in record time!`);
-    
+
     return allCollections.slice(0, maxCollections);
-    
+
   } catch (error: any) {
     console.error('❌ Error in collection discovery:', error);
-    
+
     // Check if it's a timeout error
     if (error.message?.includes('timeout')) {
       console.log('⏱️ Discovery timed out, using backup method for reliability');
@@ -873,7 +999,7 @@ export const discoverAllCollections = async (
         });
       }
     }
-    
+
     // Fallback to basic discovery (fast and reliable)
     return await basicCollectionDiscovery(maxCollections, progressCallback);
   }
@@ -894,17 +1020,17 @@ const efficientMovieScan = async (
 
   for (const { name, endpoint } of endpoints) {
     updateProgress(`Scanning ${name}...`);
-    
+
     try {
       const response = await tmdbApi.get(endpoint, { params: { page: 1 } });
       const movies = response.data.results?.slice(0, 10) || []; // Only first 10 movies for speed
-      
+
       for (const movie of movies) {
         try {
           const movieDetails = await getMovieDetails(movie.id);
           totalScanned++;
           updateScanned(totalScanned);
-          
+
           if (movieDetails?.belongs_to_collection && !collectionsMap.has(movieDetails.belongs_to_collection.id)) {
             const collection = await getCollectionDetails(movieDetails.belongs_to_collection.id);
             if (collection && collection.film_count >= 2) {
@@ -912,13 +1038,13 @@ const efficientMovieScan = async (
               console.log(`🎬 Found collection: ${collection.name} (${collection.film_count} films)`);
             }
           }
-          
+
           await delay(RATE_LIMIT_DELAY);
         } catch (error) {
           // Skip individual movie errors
         }
       }
-      
+
       await delay(50); // Reduced delay between endpoints
     } catch (error) {
       console.warn(`Error scanning ${name}:`, error);
@@ -938,7 +1064,7 @@ const targetedFranchiseSearch = async (
 
   for (const franchise of essentialFranchises) {
     updateProgress(`Searching for ${franchise}...`);
-    
+
     try {
       const searchResponse = await searchCollections(franchise);
       if (searchResponse?.results) {
@@ -974,7 +1100,7 @@ const quickGenreSampling = async (
 
   for (const genre of topGenres) {
     updateProgress(`Sampling ${genre.name} collections...`);
-    
+
     try {
       const response = await tmdbApi.get('/discover/movie', {
         params: {
@@ -983,9 +1109,9 @@ const quickGenreSampling = async (
           page: 1
         }
       });
-      
+
       const movies = response.data.results?.slice(0, 5) || []; // Only 5 movies per genre
-      
+
       for (const movie of movies) {
         try {
           const movieDetails = await getMovieDetails(movie.id);
@@ -1001,7 +1127,7 @@ const quickGenreSampling = async (
           // Skip individual errors
         }
       }
-      
+
       await delay(30); // Reduced delay between genres
     } catch (error) {
       console.warn(`Error sampling ${genre.name} collections:`, error);
@@ -1015,7 +1141,7 @@ const basicCollectionDiscovery = async (
   progressCallback?: (progress: { scanned: number; found: number; step: string }) => void
 ): Promise<CollectionDetails[]> => {
   const collections: CollectionDetails[] = [];
-  
+
   try {
     if (progressCallback) {
       progressCallback({ scanned: 0, found: 0, step: 'Using backup discovery method...' });
@@ -1024,13 +1150,13 @@ const basicCollectionDiscovery = async (
     // Just get collections from popular movies - minimal approach
     const response = await tmdbApi.get('/movie/popular');
     const movies = response.data.results?.slice(0, 15) || []; // Reduced to 15 movies
-    
+
     let scanned = 0;
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
         scanned++;
-        
+
         if (movieDetails?.belongs_to_collection) {
           const collection = await getCollectionDetails(movieDetails.belongs_to_collection.id);
           if (collection && collection.film_count >= 2) {
@@ -1041,33 +1167,33 @@ const basicCollectionDiscovery = async (
             }
           }
         }
-        
+
         if (progressCallback) {
-          progressCallback({ 
-            scanned, 
-            found: collections.length, 
-            step: `Found ${collections.length} collections...` 
+          progressCallback({
+            scanned,
+            found: collections.length,
+            step: `Found ${collections.length} collections...`
           });
         }
-        
+
         await delay(50); // Reduced delay
-        
+
         if (collections.length >= maxCollections) break;
       } catch (error) {
         // Skip individual errors
       }
     }
-    
+
     if (progressCallback) {
-      progressCallback({ 
-        scanned, 
-        found: collections.length, 
-        step: `✅ Backup method found ${collections.length} collections` 
+      progressCallback({
+        scanned,
+        found: collections.length,
+        step: `✅ Backup method found ${collections.length} collections`
       });
     }
-    
+
     return collections.sort((a, b) => b.film_count - a.film_count);
-    
+
   } catch (error) {
     console.error('❌ Even basic discovery failed:', error);
     return [];
@@ -1119,86 +1245,86 @@ export const getNextCollectionsBatch = async (
 ): Promise<{ collections: CollectionDetails[]; hasMore: boolean }> => {
   try {
     console.log(`📄 Loading next batch of ${batchSize} collections...`);
-    
+
     const newCollections = new Map<number, CollectionDetails>();
     let attempts = 0;
     const maxAttempts = 12; // Increased attempts for more discovery methods
-    
+
     // Try different discovery methods until we get enough collections
     while (newCollections.size < batchSize && attempts < maxAttempts) {
       attempts++;
-      
+
       const currentSize = newCollections.size;
-      
+
       // Method 1: Popular movies from different pages
       if (attempts === 1) {
         await discoverFromPopularMovies(newCollections, paginationCache.moviePageIndex, 8);
         paginationCache.moviePageIndex++;
       }
-      
+
       // Method 2: Genre-based discovery
       else if (attempts === 2) {
         await discoverFromGenres(newCollections, paginationCache.genreIndex, 5);
         paginationCache.genreIndex++;
       }
-      
+
       // Method 3: Year-based discovery
       else if (attempts === 3) {
         await discoverFromYears(newCollections, 5);
       }
-      
+
       // Method 4: Search-based discovery
       else if (attempts === 4) {
         await discoverFromSearchTerms(newCollections, paginationCache.searchTermIndex, 5);
         paginationCache.searchTermIndex++;
       }
-      
+
       // Method 5: Now playing/upcoming movies
       else if (attempts === 5) {
         await discoverFromCurrentMovies(newCollections, 8);
       }
-      
+
       // Method 6: Top rated movies
       else if (attempts === 6) {
         await discoverFromTopRatedMovies(newCollections, Math.floor(paginationCache.moviePageIndex / 2) + 1, 6);
       }
-      
+
       // Method 7: Trending movies (weekly)
       else if (attempts === 7) {
         await discoverFromTrendingMovies(newCollections, 'week', 6);
       }
-      
+
       // Method 8: Trending movies (daily)
       else if (attempts === 8) {
         await discoverFromTrendingMovies(newCollections, 'day', 6);
       }
-      
+
       // Method 9: Actor-based discovery (popular actors)
       else if (attempts === 9) {
         await discoverFromPopularActors(newCollections, 4);
       }
-      
+
       // Method 10: Director-based discovery
       else if (attempts === 10) {
         await discoverFromPopularDirectors(newCollections, 4);
       }
-      
+
       // Method 11: Company-based discovery (studios)
       else if (attempts === 11) {
         await discoverFromProductionCompanies(newCollections, 4);
       }
-      
+
       // Method 12: Random deep discovery
       else if (attempts === 12) {
         await discoverFromRandomDeepSearch(newCollections, 8);
       }
-      
+
       // If no new collections found in this attempt, skip ahead
       if (newCollections.size === currentSize) {
         console.log(`⚠️ Method ${attempts} returned no new collections, trying next method...`);
       }
     }
-    
+
     const collections = Array.from(newCollections.values())
       .filter(collection => {
         // Avoid duplicates from cache
@@ -1206,22 +1332,22 @@ export const getNextCollectionsBatch = async (
       })
       .sort((a, b) => b.film_count - a.film_count)
       .slice(0, batchSize);
-    
+
     // Add to cache
     paginationCache.collections.push(...collections);
     paginationCache.currentPage++;
     paginationCache.lastFetched = Date.now();
-    
+
     console.log(`✅ Loaded ${collections.length} new collections (total cached: ${paginationCache.collections.length})`);
-    
+
     // Always return hasMore as true for infinite scroll (only stop if truly no collections found)
     const hasMore = collections.length > 0 || paginationCache.currentPage < 100; // Give it more chances
-    
+
     return {
       collections,
       hasMore
     };
-    
+
   } catch (error) {
     console.error('❌ Error loading next batch:', error);
     // Even on error, return hasMore as true so user can try again
@@ -1238,7 +1364,7 @@ const discoverFromPopularMovies = async (
   try {
     const response = await tmdbApi.get('/movie/popular', { params: { page } });
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1278,9 +1404,9 @@ const discoverFromGenres = async (
     { id: 53, name: 'Thriller' },
     { id: 37, name: 'Western' }
   ];
-  
+
   const genre = genres[genreIndex % genres.length];
-  
+
   try {
     const response = await tmdbApi.get('/discover/movie', {
       params: {
@@ -1289,9 +1415,9 @@ const discoverFromGenres = async (
         page: Math.floor(genreIndex / genres.length) + 1
       }
     });
-    
+
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1318,7 +1444,7 @@ const discoverFromYears = async (
 ): Promise<void> => {
   const currentYear = new Date().getFullYear();
   const randomYear = currentYear - Math.floor(Math.random() * 30); // Random year from last 30 years
-  
+
   try {
     const response = await tmdbApi.get('/discover/movie', {
       params: {
@@ -1327,9 +1453,9 @@ const discoverFromYears = async (
         page: 1
       }
     });
-    
+
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1361,14 +1487,14 @@ const discoverFromSearchTerms = async (
     'war', 'battle', 'hero', 'super', 'magic', 'dragon', 'space',
     'world', 'kingdom', 'empire', 'destiny', 'revenge', 'return'
   ];
-  
+
   const term = searchTerms[termIndex % searchTerms.length];
-  
+
   try {
     const searchResponse = await searchCollections(term);
     if (searchResponse?.results) {
       const collections = searchResponse.results.slice(0, maxResults);
-      
+
       for (const collection of collections) {
         if (!collectionsMap.has(collection.id)) {
           const detailedCollection = await getCollectionDetails(collection.id);
@@ -1391,11 +1517,11 @@ const discoverFromCurrentMovies = async (
 ): Promise<void> => {
   const endpoints = ['/movie/now_playing', '/movie/upcoming'];
   const endpoint = endpoints[Math.floor(Math.random() * endpoints.length)];
-  
+
   try {
     const response = await tmdbApi.get(endpoint);
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1424,7 +1550,7 @@ const discoverFromTopRatedMovies = async (
   try {
     const response = await tmdbApi.get('/movie/top_rated', { params: { page } });
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1453,7 +1579,7 @@ const discoverFromTrendingMovies = async (
   try {
     const response = await tmdbApi.get(`/trending/movie/${timeWindow}`);
     const movies = response.data.results?.slice(0, maxMovies) || [];
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1481,12 +1607,12 @@ const discoverFromPopularActors = async (
   try {
     const response = await tmdbApi.get('/person/popular');
     const actors = response.data.results?.slice(0, maxActors) || [];
-    
+
     for (const actor of actors) {
       try {
         const creditsResponse = await tmdbApi.get(`/person/${actor.id}/movie_credits`);
         const movies = creditsResponse.data.cast?.slice(0, 5) || []; // Top 5 movies per actor
-        
+
         for (const movie of movies) {
           try {
             const movieDetails = await getMovieDetails(movie.id);
@@ -1531,14 +1657,14 @@ const discoverFromPopularDirectors = async (
     4945, // Joe Russo
     1224, // George Lucas
   ];
-  
+
   const selectedDirectors = famousDirectors.slice(0, maxDirectors);
-  
+
   for (const directorId of selectedDirectors) {
     try {
       const creditsResponse = await tmdbApi.get(`/person/${directorId}/movie_credits`);
       const movies = creditsResponse.data.crew?.filter((credit: any) => credit.job === 'Director').slice(0, 4) || [];
-      
+
       for (const movie of movies) {
         try {
           const movieDetails = await getMovieDetails(movie.id);
@@ -1580,9 +1706,9 @@ const discoverFromProductionCompanies = async (
     1429, // Plan B Entertainment
     436, // Sony Pictures
   ];
-  
+
   const selectedStudios = majorStudios.slice(0, maxCompanies);
-  
+
   for (const companyId of selectedStudios) {
     try {
       const response = await tmdbApi.get('/discover/movie', {
@@ -1592,9 +1718,9 @@ const discoverFromProductionCompanies = async (
           page: 1
         }
       });
-      
+
       const movies = response.data.results?.slice(0, 3) || [];
-      
+
       for (const movie of movies) {
         try {
           const movieDetails = await getMovieDetails(movie.id);
@@ -1633,7 +1759,7 @@ const discoverFromRandomDeepSearch = async (
       });
       return response.data.results?.slice(0, maxMovies) || [];
     },
-    
+
     // Movies with high vote counts (popular franchises)
     async () => {
       const response = await tmdbApi.get('/discover/movie', {
@@ -1645,7 +1771,7 @@ const discoverFromRandomDeepSearch = async (
       });
       return response.data.results?.slice(0, maxMovies) || [];
     },
-    
+
     // Movies with specific keywords that often indicate collections
     async () => {
       const keywords = [51540, 158431, 162846, 180547, 209714]; // sequel, prequel, franchise, etc.
@@ -1660,13 +1786,13 @@ const discoverFromRandomDeepSearch = async (
       return response.data.results?.slice(0, maxMovies) || [];
     }
   ];
-  
+
   // Try a random discovery method
   const method = discoveryMethods[Math.floor(Math.random() * discoveryMethods.length)];
-  
+
   try {
     const movies = await method();
-    
+
     for (const movie of movies) {
       try {
         const movieDetails = await getMovieDetails(movie.id);
@@ -1699,42 +1825,42 @@ export const getPopularCollections = async (): Promise<CollectionDetails[]> => {
 // Get collections by category with better filtering
 export const getCollectionsByCategory = async (category: string): Promise<CollectionDetails[]> => {
   const allCollections = await discoverAllCollections();
-  
+
   switch (category) {
     case 'popular':
       return allCollections
-        .filter(c => ['Marvel', 'Star Wars', 'Harry Potter', 'Fast', 'Bond', 'Batman', 'Spider'].some(keyword => 
+        .filter(c => ['Marvel', 'Star Wars', 'Harry Potter', 'Fast', 'Bond', 'Batman', 'Spider'].some(keyword =>
           c.name.toLowerCase().includes(keyword.toLowerCase())
         ))
         .slice(0, 10);
-        
+
     case 'complete':
       return allCollections
         .filter(c => c.status === 'complete')
         .slice(0, 10);
-        
+
     case 'trilogies':
       return allCollections
         .filter(c => c.type === 'trilogy')
         .slice(0, 10);
-        
+
     case 'extended':
       return allCollections
         .filter(c => c.type === 'extended_series' && c.film_count >= 5)
         .slice(0, 10);
-        
+
     case 'superhero':
       return allCollections
         .filter(c => ['Marvel', 'Batman', 'Superman', 'Spider', 'X-Men', 'Wonder Woman', 'Avengers'].some(keyword =>
           c.name.toLowerCase().includes(keyword.toLowerCase())
         ))
         .slice(0, 10);
-        
+
     case 'action':
       return allCollections
         .filter(c => c.genre_categories.includes('Action'))
         .slice(0, 10);
-        
+
     default:
       return allCollections.slice(0, 10);
   }
@@ -1743,12 +1869,12 @@ export const getCollectionsByCategory = async (category: string): Promise<Collec
 // Updated trending collections using dynamic discovery
 export const getTrendingCollections = async (): Promise<CollectionDetails[]> => {
   const allCollections = await discoverAllCollections();
-  
+
   // Return collections that have recent releases or are currently popular
   const currentYear = new Date().getFullYear();
   return allCollections
     .filter(collection => {
-      const latestYear = Math.max(...collection.parts.map(film => 
+      const latestYear = Math.max(...collection.parts.map(film =>
         new Date(film.release_date || '').getFullYear()
       ));
       return latestYear >= currentYear - 2; // Released within last 2 years
@@ -1768,11 +1894,11 @@ export const searchCollectionsAdvanced = async (
   } = {}
 ): Promise<CollectionDetails[]> => {
   if (!query.trim()) return [];
-  
+
   try {
     const allCollections = await discoverAllCollections();
     const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 1);
-    
+
     let results = allCollections.filter(collection => {
       const searchableText = [
         collection.name,
@@ -1781,20 +1907,20 @@ export const searchCollectionsAdvanced = async (
         collection.type,
         collection.status
       ].join(' ').toLowerCase();
-      
+
       // Search in collection metadata
       const matchesCollection = searchTerms.some(term => searchableText.includes(term));
-      
+
       // Search within individual movies in the collection
       const matchesMovies = collection.parts.some(movie => {
         const movieText = [
           movie.title,
           movie.overview || ''
         ].join(' ').toLowerCase();
-        
+
         return searchTerms.some(term => movieText.includes(term));
       });
-      
+
       // Search keywords and tags
       const matchesKeywords = searchTerms.some(term => {
         // Common franchise keywords
@@ -1804,12 +1930,12 @@ export const searchCollectionsAdvanced = async (
           'marvel', 'dc', 'disney', 'pixar', 'sequel', 'prequel', 'trilogy',
           'universe', 'saga', 'series', 'franchise', 'collection'
         ];
-        
-        return franchiseKeywords.some(keyword => 
+
+        return franchiseKeywords.some(keyword =>
           keyword.includes(term) || term.includes(keyword)
         );
       });
-      
+
       // Character name matching (common character names)
       const matchesCharacters = searchTerms.some(term => {
         const characterNames = [
@@ -1818,70 +1944,70 @@ export const searchCollectionsAdvanced = async (
           'bond', 'bourne', 'potter', 'gandalf', 'frodo', 'vader', 'luke',
           'indiana jones', 'terminator', 'alien', 'predator', 'godzilla'
         ];
-        
-        return characterNames.some(char => 
+
+        return characterNames.some(char =>
           char.includes(term) || term.includes(char) ||
           collection.name.toLowerCase().includes(char)
         );
       });
-      
+
       return matchesCollection || matchesMovies || matchesKeywords || matchesCharacters;
     });
-    
+
     // Apply additional filters
     if (options.minFilms !== undefined) {
       results = results.filter(c => c.film_count >= options.minFilms!);
     }
-    
+
     if (options.maxFilms !== undefined) {
       results = results.filter(c => c.film_count <= options.maxFilms!);
     }
-    
+
     if (options.genres && options.genres.length > 0) {
-      results = results.filter(c => 
+      results = results.filter(c =>
         options.genres!.some(genre => c.genre_categories.includes(genre))
       );
     }
-    
+
     if (options.status && options.status.length > 0) {
       results = results.filter(c => options.status!.includes(c.status));
     }
-    
+
     if (options.type && options.type.length > 0) {
       results = results.filter(c => options.type!.includes(c.type));
     }
-    
+
     // Score and sort results by relevance
     const scoredResults = results.map(collection => {
       let score = 0;
       const lowerQuery = query.toLowerCase();
       const lowerName = collection.name.toLowerCase();
-      
+
       // Exact name match gets highest score
       if (lowerName === lowerQuery) score += 100;
       // Name starts with query gets high score  
       else if (lowerName.startsWith(lowerQuery)) score += 50;
       // Name contains query gets medium score
       else if (lowerName.includes(lowerQuery)) score += 25;
-      
+
       // Boost popular collections (more films = more popular)
       score += Math.min(collection.film_count * 2, 20);
-      
+
       // Boost collections with exact genre match
-      if (collection.genre_categories.some(genre => 
+      if (collection.genre_categories.some(genre =>
         genre.toLowerCase().includes(lowerQuery)
       )) {
         score += 15;
       }
-      
+
       return { collection, score };
     });
-    
+
     // Sort by score (highest first) and return collections
     return scoredResults
       .sort((a, b) => b.score - a.score)
       .map(item => item.collection);
-    
+
   } catch (error) {
     console.error('Error in comprehensive search:', error);
     return [];
@@ -1891,20 +2017,20 @@ export const searchCollectionsAdvanced = async (
 // Direct TMDB search for collections (fallback when local search fails)
 export const searchCollectionsDirect = async (query: string): Promise<CollectionDetails[]> => {
   if (!query.trim()) return [];
-  
+
   try {
     console.log(`🔍 Direct TMDB search for: "${query}"`);
-    
+
     // Search TMDB directly for collections
     const searchResponse = await searchCollections(query);
-    
+
     if (!searchResponse?.results || searchResponse.results.length === 0) {
       return [];
     }
-    
+
     // Get detailed collection info for the results
     const detailedCollections: CollectionDetails[] = [];
-    
+
     for (const collection of searchResponse.results.slice(0, 10)) { // Limit to top 10
       try {
         const detailed = await getCollectionDetails(collection.id);
@@ -1916,10 +2042,10 @@ export const searchCollectionsDirect = async (query: string): Promise<Collection
         console.warn(`Failed to get details for collection ${collection.id}:`, error);
       }
     }
-    
+
     console.log(`✅ Direct search found ${detailedCollections.length} collections`);
     return detailedCollections;
-    
+
   } catch (error) {
     console.error('Error in direct TMDB search:', error);
     return [];
@@ -1929,41 +2055,41 @@ export const searchCollectionsDirect = async (query: string): Promise<Collection
 // Hybrid search - combines local and direct TMDB search
 export const searchCollectionsHybrid = async (query: string): Promise<CollectionDetails[]> => {
   if (!query.trim()) return [];
-  
+
   try {
     // First try local advanced search
     const localResults = await searchCollectionsAdvanced(query);
-    
+
     // If we have good results, return them
     if (localResults.length >= 5) {
       console.log(`📦 Using ${localResults.length} local search results`);
       return localResults;
     }
-    
+
     // If local results are limited, also try direct TMDB search
     console.log(`📡 Enhancing with direct TMDB search...`);
     const directResults = await searchCollectionsDirect(query);
-    
+
     // Combine and deduplicate results
     const combinedMap = new Map<number, CollectionDetails>();
-    
+
     // Add local results first (they have better scoring)
     localResults.forEach(collection => {
       combinedMap.set(collection.id, collection);
     });
-    
+
     // Add direct results if they're not already included
     directResults.forEach(collection => {
       if (!combinedMap.has(collection.id)) {
         combinedMap.set(collection.id, collection);
       }
     });
-    
+
     const finalResults = Array.from(combinedMap.values());
     console.log(`🎯 Hybrid search returned ${finalResults.length} total results`);
-    
+
     return finalResults;
-    
+
   } catch (error) {
     console.error('Error in hybrid search:', error);
     return [];
@@ -1979,25 +2105,25 @@ export const getCollectionStats = async (): Promise<{
   completionStats: { [key: string]: number };
 }> => {
   const collections = await discoverAllCollections();
-  
+
   const totalFilms = collections.reduce((sum, c) => sum + c.film_count, 0);
   const genreCount = new Map<string, number>();
   const statusCount = new Map<string, number>();
-  
+
   collections.forEach(collection => {
     collection.genre_categories.forEach(genre => {
       genreCount.set(genre, (genreCount.get(genre) || 0) + 1);
     });
     statusCount.set(collection.status, (statusCount.get(collection.status) || 0) + 1);
   });
-  
+
   const topGenres = Array.from(genreCount.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([genre]) => genre);
-    
+
   const completionStats = Object.fromEntries(statusCount);
-  
+
   return {
     totalCollections: collections.length,
     totalFilms,
@@ -2022,10 +2148,10 @@ const classifyCollectionType = (filmCount: number): CollectionType => {
 
 const determineCollectionStatus = (films: Movie[]): CollectionStatus => {
   if (films.length < 3) return 'incomplete';
-  
+
   const currentYear = new Date().getFullYear();
   const latestYear = Math.max(...films.map(f => new Date(f.release_date || '').getFullYear()));
-  
+
   // If latest film is within 3 years, consider ongoing
   if (currentYear - latestYear <= 3) return 'ongoing';
   return 'complete';
@@ -2053,7 +2179,7 @@ const extractGenreCategories = (films: Movie[]): string[] => {
     10752: 'War',
     37: 'Western'
   };
-  
+
   const genreSet = new Set<string>();
   films.forEach(film => {
     film.genre_ids?.forEach(genreId => {
@@ -2062,7 +2188,7 @@ const extractGenreCategories = (films: Movie[]): string[] => {
       }
     });
   });
-  
+
   return Array.from(genreSet);
 };
 
@@ -2070,9 +2196,42 @@ const extractStudio = (films: Movie[]): string => {
   // Simple heuristic based on common patterns
   const firstFilm = films[0];
   if (!firstFilm) return 'Unknown';
-  
+
   // You could enhance this by fetching production companies from movie details
   return 'Various Studios';
+};
+
+// Batch fetch logos for multiple items
+export const batchFetchLogos = async (
+  items: Array<{ id: number; type: 'movie' | 'tv' }>
+): Promise<void> => {
+  const { logoCache } = await import('./logoCache');
+  await logoCache.preloadLogos(items);
+};
+
+// Enhanced content fetching with logo preloading
+export const getTrendingMoviesWithLogos = async (page: number = 1): Promise<ApiResponse<Movie>> => {
+  const response = await getTrendingMovies(page);
+
+  // Preload logos for trending movies in background
+  if (response.results.length > 0) {
+    batchFetchLogos(response.results.map(movie => ({ id: movie.id, type: 'movie' as const })))
+      .catch(error => console.warn('Failed to preload movie logos:', error));
+  }
+
+  return response;
+};
+
+export const getTrendingTVShowsWithLogos = async (page: number = 1): Promise<ApiResponse<TVShow>> => {
+  const response = await getTrendingTVShows(page);
+
+  // Preload logos for trending TV shows in background
+  if (response.results.length > 0) {
+    batchFetchLogos(response.results.map(tvShow => ({ id: tvShow.id, type: 'tv' as const })))
+      .catch(error => console.warn('Failed to preload TV show logos:', error));
+  }
+
+  return response;
 };
 
 // Error handling wrapper

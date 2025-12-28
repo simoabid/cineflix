@@ -3,14 +3,9 @@ import {
   Play, 
   MoreVertical, 
   Star, 
-  Clock, 
-  Calendar, 
   Trash2, 
   CheckSquare, 
   Square,
-  Flag,
-  Tag,
-  Eye,
   EyeOff
 } from 'lucide-react';
 import { MyListItem, ContentStatus, PriorityLevel } from '../../types/myList';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Clock, Plus, ArrowRight } from 'lucide-react';
+import { Play, Plus, ArrowRight } from 'lucide-react';
 import { MyListItem } from '../../types/myList';
 import { Link } from 'react-router-dom';
 
@@ -12,9 +12,7 @@ interface QuickActionsProps {
 
 const QuickActions: React.FC<QuickActionsProps> = ({
   continueWatching,
-  recentlyAdded,
-  onItemUpdate,
-  onItemRemove
+  recentlyAdded
 }) => {
   const getImageUrl = (path: string | null, size: string = 'w300') => {
     if (!path) return '/api/placeholder/300/450';

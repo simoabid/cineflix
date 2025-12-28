@@ -1,19 +1,30 @@
 import React, { useState } from 'react';
-import { Filter, X, ChevronDown, Tag, Calendar, Star, Clock, Film, Tv, FileText } from 'lucide-react';
-import { FilterOptions } from '../../types/myList';
+import { Filter, X, ChevronDown, Tag, Calendar, Star, Clock, Film, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { FilterOptions, SortOption, SortDirection } from '../../types/myList';
 
 interface FilterBarProps {
   filters: FilterOptions;
   onFilterChange: (filters: Partial<FilterOptions>) => void;
   availableTags: string[];
+  sortBy: SortOption;
+  sortDirection: SortDirection;
+  onSortChange: (sortBy: SortOption, direction?: SortDirection) => void;
 }
 
 const FilterBar: React.FC<FilterBarProps> = ({
   filters,
   onFilterChange,
-  availableTags
+  availableTags,
+  sortBy,
+  sortDirection,
+  onSortChange
 }) => {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const getSortIcon = (option: SortOption) => {
+    if (sortBy !== option) return <ArrowUpDown className="w-4 h-4" />;
+    return sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />;
+  };
 
   const hasActiveFilters = () => {
     return (
@@ -54,80 +65,133 @@ const FilterBar: React.FC<FilterBarProps> = ({
 
   return (
     <div className="mb-6">
-      {/* Quick Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-gray-400" />
-          <span className="text-gray-400 text-sm">Filters:</span>
+      <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4 mb-4">
+        {/* Quick Filters */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-gray-400" />
+            <span className="text-gray-400 text-sm">Filters:</span>
+          </div>
+
+          {/* Content Type */}
+          <select
+            value={filters.contentType}
+            onChange={(e) => onFilterChange({ contentType: e.target.value as any })}
+            className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
+          >
+            <option value="all">All Content</option>
+            <option value="movie">Movies</option>
+            <option value="tv">TV Shows</option>
+            <option value="documentary">Documentaries</option>
+          </select>
+
+          {/* Status */}
+          <select
+            value={filters.status}
+            onChange={(e) => onFilterChange({ status: e.target.value as any })}
+            className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
+          >
+            <option value="all">All Status</option>
+            <option value="notStarted">Not Started</option>
+            <option value="inProgress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="dropped">Dropped</option>
+          </select>
+
+          {/* Priority */}
+          <select
+            value={filters.priority}
+            onChange={(e) => onFilterChange({ priority: e.target.value as any })}
+            className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
+          >
+            <option value="all">All Priority</option>
+            <option value="high">High Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="low">Low Priority</option>
+          </select>
+
+          {/* Liked Content */}
+          <select
+            value={filters.liked}
+            onChange={(e) => onFilterChange({ liked: e.target.value as any })}
+            className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
+          >
+            <option value="all">All Content</option>
+            <option value="liked">❤️ Liked</option>
+            <option value="notLiked">Not Liked</option>
+          </select>
+
+          {/* Advanced Filters Toggle */}
+          <button
+            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+            className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+          >
+            <span>Advanced</span>
+            <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Clear Filters */}
+          {hasActiveFilters() && (
+            <button
+              onClick={clearAllFilters}
+              className="flex items-center gap-2 px-3 py-2 bg-netflix-red hover:bg-red-700 text-white rounded-lg transition-colors"
+            >
+              <X className="w-4 h-4" />
+              Clear All
+            </button>
+          )}
         </div>
 
-        {/* Content Type */}
-        <select
-          value={filters.contentType}
-          onChange={(e) => onFilterChange({ contentType: e.target.value as any })}
-          className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
-        >
-          <option value="all">All Content</option>
-          <option value="movie">Movies</option>
-          <option value="tv">TV Shows</option>
-          <option value="documentary">Documentaries</option>
-        </select>
+        {/* Sort Controls */}
+        <div className="flex items-center gap-2 self-start xl:self-auto pt-1 xl:pt-0">
+          <span className="text-gray-400 text-sm mr-2 whitespace-nowrap">Sort by:</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => onSortChange('dateAdded')}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors whitespace-nowrap ${sortBy === 'dateAdded'
+                ? 'bg-netflix-red text-white'
+                : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+            >
+              Date Added
+              {getSortIcon('dateAdded')}
+            </button>
 
-        {/* Status */}
-        <select
-          value={filters.status}
-          onChange={(e) => onFilterChange({ status: e.target.value as any })}
-          className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
-        >
-          <option value="all">All Status</option>
-          <option value="notStarted">Not Started</option>
-          <option value="inProgress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="dropped">Dropped</option>
-        </select>
+            <button
+              onClick={() => onSortChange('title')}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors whitespace-nowrap ${sortBy === 'title'
+                ? 'bg-netflix-red text-white'
+                : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+            >
+              Title
+              {getSortIcon('title')}
+            </button>
 
-        {/* Priority */}
-        <select
-          value={filters.priority}
-          onChange={(e) => onFilterChange({ priority: e.target.value as any })}
-          className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
-        >
-          <option value="all">All Priority</option>
-          <option value="high">High Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="low">Low Priority</option>
-        </select>
+            <button
+              onClick={() => onSortChange('rating')}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors whitespace-nowrap ${sortBy === 'rating'
+                ? 'bg-netflix-red text-white'
+                : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+            >
+              Rating
+              {getSortIcon('rating')}
+            </button>
 
-        {/* Liked Content */}
-        <select
-          value={filters.liked}
-          onChange={(e) => onFilterChange({ liked: e.target.value as any })}
-          className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-700 focus:border-netflix-red focus:outline-none"
-        >
-          <option value="all">All Content</option>
-          <option value="liked">❤️ Liked</option>
-          <option value="notLiked">Not Liked</option>
-        </select>
-
-        {/* Advanced Filters Toggle */}
-        <button
-          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-          className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
-        >
-          <span>Advanced</span>
-          <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Clear Filters */}
-        {hasActiveFilters() && (
-          <button
-            onClick={clearAllFilters}
-            className="flex items-center gap-2 px-3 py-2 bg-netflix-red hover:bg-red-700 text-white rounded-lg transition-colors"
-          >
-            <X className="w-4 h-4" />
-            Clear All
-          </button>
-        )}
+            <button
+              onClick={() => onSortChange('runtime')}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors whitespace-nowrap ${sortBy === 'runtime'
+                ? 'bg-netflix-red text-white'
+                : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+            >
+              <span className="hidden sm:inline">Runtime</span>
+              <span className="sm:hidden">Time</span>
+              {getSortIcon('runtime')}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Advanced Filters */}
@@ -218,11 +282,10 @@ const FilterBar: React.FC<FilterBarProps> = ({
                   <button
                     key={tag}
                     onClick={() => toggleTag(tag)}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                      filters.customTags.includes(tag)
-                        ? 'bg-netflix-red text-white'
-                        : 'bg-gray-800 text-gray-400 hover:text-white'
-                    }`}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${filters.customTags.includes(tag)
+                      ? 'bg-netflix-red text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                      }`}
                   >
                     {tag}
                   </button>
@@ -239,9 +302,9 @@ const FilterBar: React.FC<FilterBarProps> = ({
           {filters.contentType !== 'all' && (
             <div className="flex items-center gap-2 bg-netflix-red/20 text-netflix-red px-3 py-1 rounded-full text-sm">
               <Film className="w-3 h-3" />
-              {filters.contentType === 'movie' ? 'Movies' : 
-               filters.contentType === 'tv' ? 'TV Shows' : 
-               filters.contentType === 'documentary' ? 'Documentaries' : filters.contentType}
+              {filters.contentType === 'movie' ? 'Movies' :
+                filters.contentType === 'tv' ? 'TV Shows' :
+                  filters.contentType === 'documentary' ? 'Documentaries' : filters.contentType}
               <button
                 onClick={() => onFilterChange({ contentType: 'all' })}
                 className="hover:text-white"

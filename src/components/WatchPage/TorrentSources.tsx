@@ -8,7 +8,6 @@ import {
   Shield,
   AlertTriangle,
   Signal,
-  Globe,
   Link,
   FileDown,
   ShieldAlert,
@@ -324,12 +323,12 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
             {validatedSources.length} Available
           </span>
         </div>
-        
+
         <div className="flex items-center space-x-4">
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className="bg-gray-800 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#ff0000] focus:outline-none"
+            className="bg-[#13132B] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#ff0000] focus:outline-none"
           >
             <option value="seeders">Sort by Seeders</option>
             <option value="size">Sort by Size</option>
@@ -350,7 +349,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
           <div>
             <h3 className="text-yellow-400 font-semibold mb-1">Privacy Recommendation</h3>
             <p className="text-yellow-200 text-sm">
-              For your privacy and security, we recommend using a VPN when downloading torrents. 
+              For your privacy and security, we recommend using a VPN when downloading torrents.
               This helps protect your identity and ensures safe torrenting.
             </p>
           </div>
@@ -365,7 +364,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
-            className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-300"
+            className="bg-[#13132B] rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-300"
           >
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
               {/* Source Info */}
@@ -374,7 +373,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                   <div className="w-12 h-12 bg-[#ff0000]/20 rounded-lg flex items-center justify-center flex-shrink-0">
                     <Download className="h-6 w-6 text-[#ff0000]" />
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2 mb-2">
                       <h3 className="text-white font-semibold text-lg truncate">{source.name}</h3>
@@ -382,7 +381,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                         <CheckCircle2 className="h-5 w-5 text-green-400 flex-shrink-0" />
                       )}
                     </div>
-                    
+
                     <div className="flex flex-wrap gap-2 mb-2">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getQualityColor(source.quality)}`}>
                         {source.quality}
@@ -396,7 +395,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                         </span>
                       )}
                     </div>
-                    
+
                     <div className="flex items-center space-x-4 text-sm text-gray-400">
                       {source.uploadedBy && (
                         <div className="flex items-center space-x-1">
@@ -431,7 +430,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                     <div className="text-gray-400 text-sm">Ratio</div>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-center space-x-2 mt-3">
                   {getHealthIcon(source.health)}
                   <span className={`text-sm font-medium ${getHealthColor(source.health)}`}>
@@ -450,10 +449,10 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                     >
-                                              <Link className="h-4 w-4" />
+                      <Link className="h-4 w-4" />
                       <span>Magnet</span>
                     </motion.button>
-                    
+
                     {source.torrentFileUrl && (
                       <motion.button
                         onClick={() => handleTorrentDownload(source.torrentFileUrl!)}
@@ -466,7 +465,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
                       </motion.button>
                     )}
                   </div>
-                  
+
                   <button
                     onClick={() => copyMagnetLink(source.magnetLink)}
                     className="w-full px-4 py-2 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm"
@@ -485,13 +484,13 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="bg-gray-800/50 rounded-lg p-6 border border-gray-700"
+        className="bg-[#13132B]/50 rounded-lg p-6 border border-gray-700"
       >
         <h3 className="text-white font-semibold mb-4 flex items-center">
           <Shield className="h-5 w-5 text-[#ff0000] mr-2" />
           Torrent Guide & Safety Tips
         </h3>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h4 className="text-white font-medium mb-2">How to Use Torrents</h4>
@@ -502,7 +501,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
               <p>• Choose download location and start downloading</p>
             </div>
           </div>
-          
+
           <div>
             <h4 className="text-white font-medium mb-2">Quality Guide</h4>
             <div className="space-y-2 text-sm text-gray-300">
@@ -512,7 +511,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
               <p>• <span className="text-yellow-400">TS/CAM</span>: Lower quality, avoid if possible</p>
             </div>
           </div>
-          
+
           <div>
             <h4 className="text-white font-medium mb-2">Health Indicators</h4>
             <div className="space-y-2 text-sm text-gray-300">
@@ -522,7 +521,7 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
               <p>• <span className="text-red-400">Poor</span>: Very few seeders, may stall</p>
             </div>
           </div>
-          
+
           <div>
             <h4 className="text-white font-medium mb-2">Safety Tips</h4>
             <div className="space-y-2 text-sm text-gray-300">
@@ -533,14 +532,14 @@ const TorrentSources: React.FC<TorrentSourcesProps> = ({ sources }) => {
             </div>
           </div>
         </div>
-        
+
         <div className="mt-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg">
           <div className="flex items-start space-x-3">
             <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="text-sm">
               <p className="text-red-400 font-medium mb-1">Legal Disclaimer</p>
               <p className="text-red-300">
-                Torrenting copyrighted content may be illegal in your jurisdiction. 
+                Torrenting copyrighted content may be illegal in your jurisdiction.
                 Use these sources responsibly and in accordance with your local laws.
               </p>
             </div>

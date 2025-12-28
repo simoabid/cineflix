@@ -76,7 +76,14 @@ const SearchPage: React.FC = () => {
         {/* Search Results */}
         {loading ? (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-netflix-red"></div>
+            <div className="relative">
+              {/* Main thick spinner */}
+              <div className="h-16 w-16 netflix-spinner-thick" />
+              
+              {/* Ripple effects */}
+              <div className="h-16 w-16 netflix-ripple" />
+              <div className="h-16 w-16 netflix-ripple" style={{ animationDelay: '0.5s' }} />
+            </div>
           </div>
         ) : results.length === 0 ? (
           <div className="text-center py-12">

@@ -100,7 +100,7 @@ export const transformDownloadProgress = (
       return {
         ...download,
         progress: newProgress,
-        status: isCompleted ? 'completed' : 'downloading',
+        status: (isCompleted ? 'completed' : 'downloading') as 'downloading' | 'paused' | 'completed' | 'error',
         timeRemaining: isCompleted ? '0 min' : `${Math.max(1, Math.floor((100 - newProgress) / 2))} min`,
         speed: isCompleted ? '0 MB/s' : `${(Math.random() * 3 + 2).toFixed(1)} MB/s`
       };
@@ -160,7 +160,7 @@ export const normalizeEstimatedTime = (time: unknown): string => {
 
 const DownloadOptions: React.FC<DownloadOptionsProps> = ({ options }) => {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress[]>([]);
-  const [selectedOption, setSelectedOption] = useState<DownloadOption | null>(null);
+  const [selectedOption] = useState<DownloadOption | null>(null);
 
   /**
    * Starts a fresh download entry for the given option id.

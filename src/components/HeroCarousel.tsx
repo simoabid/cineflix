@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star, Calendar } from 'lucide-react';
 import { getImageUrl } from '../services/tmdb';
+import LogoImage from './LogoImage';
 
 interface HeroItem {
   id: number;
@@ -9,6 +10,7 @@ interface HeroItem {
   overview: string;
   backdrop_path: string | null;
   poster_path: string | null;
+  logo_path?: string | null;
   vote_average: number;
   release_date?: string;
   first_air_date?: string;
@@ -58,7 +60,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onTrailerClick, type
   const currentItem = items[currentIndex];
 
   return (
-    <div 
+    <div
       className="relative h-[70vh] md:h-[85vh] overflow-hidden"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -74,17 +76,27 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onTrailerClick, type
             target.src = getImageUrl(currentItem.poster_path, 'original');
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/40 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A1F] via-[#0A0A1F]/40 to-transparent"></div>
       </div>
 
       {/* Content */}
       <div className="absolute inset-0 flex items-end">
         <div className="max-w-7xl mx-auto px-4 sm:px-8 pb-8 md:pb-16">
           <div className="max-w-2xl">
-            <h1 className="text-3xl md:text-5xl font-bold mb-4">
-              {currentItem.title}
-            </h1>
-            
+            <div className="mb-4">
+              <LogoImage
+                logoPath={currentItem.logo_path}
+                title={currentItem.title}
+                size="xl"
+                className="justify-start"
+                textClassName="text-3xl md:text-5xl font-bold"
+                maxHeight="max-h-20 md:max-h-28"
+                contentId={currentItem.id}
+                contentType={type}
+                enableOnDemandFetch={true}
+              />
+            </div>
+
             <div className="flex items-center gap-4 mb-4">
               <div className="flex items-center gap-1">
                 <Star className="w-4 h-4 text-yellow-400 fill-current" />
@@ -129,18 +141,18 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onTrailerClick, type
         <>
           <button
             onClick={prevSlide}
-            className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 p-2 rounded-full transition-colors"
+            className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 p-2 rounded-full transition-all duration-300 backdrop-blur-sm border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
             aria-label="Previous slide"
           >
-            <ChevronLeft className="w-6 h-6" />
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </button>
-          
+
           <button
             onClick={nextSlide}
-            className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 p-2 rounded-full transition-colors"
+            className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 p-2 rounded-full transition-all duration-300 backdrop-blur-sm border border-white/20 hover:border-white/40 shadow-xl hover:scale-110"
             aria-label="Next slide"
           >
-            <ChevronRight className="w-6 h-6" />
+            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </button>
         </>
       )}
@@ -152,9 +164,8 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onTrailerClick, type
             <button
               key={index}
               onClick={() => goToSlide(index)}
-              className={`w-2 h-2 rounded-full transition-colors ${
-                index === currentIndex ? 'bg-white' : 'bg-white/50'
-              }`}
+              className={`w-2 h-2 rounded-full transition-colors ${index === currentIndex ? 'bg-white' : 'bg-white/50'
+                }`}
               aria-label={`Go to slide ${index + 1}`}
             />
           ))}

@@ -1,4 +1,4 @@
-# 🎬 CineFlix
+# 🎬 CINEFLIX
 ### Full-Stack MERN Streaming Platform
 
 Welcome to **CINEFLIX**! This project is a modern, responsive streaming service tailored for a seamless user experience, mimicking the core functionality of major platforms like Netflix.
@@ -50,7 +50,7 @@ The backend manages user accounts, authentication, and your personal "My List". 
 3.  Create a file named `.env` in the `backend/` folder.
 4.  Add the following lines to `.env`:
     ```env
-    PORT=3000
+    PORT=3001
     MONGODB_URI=your_mongodb_connection_string_from_step_3
     JWT_SECRET=my_super_secure_secret_key_123
     ```
@@ -71,13 +71,13 @@ The frontend handles the visuals and movie data. It uses **The Movie Database (T
 1.  Go to [The Movie Database (TMDB)](https://www.themoviedb.org/signup) and create an account.
 2.  Go to **Settings** -> **API** (sidebar).
 3.  Click **Create** -> **Developer**.
-4.  Accept terms and fill in the basics (Application Name: "CineFlix", URL: "http://localhost:5173", Summary: "Educational project").
+4.  Accept terms and fill in the basics (Application Name: "CINEFLIX", URL: "http://localhost:3000", Summary: "Educational project").
 5.  Copy your **"API Key (v3 auth)"**.
 
 #### Step 2: Configure Frontend Environment
 1.  Open a new terminal window (keep the backend running) and navigate to the project root:
     ```bash
-    cd "CINEFLIX"
+    cd "cineflix"
     ```
 2.  Install dependencies:
     ```bash
@@ -124,7 +124,7 @@ npm run dev
     *   Check the browser console (F12). 
     *   Verify your `VITE_TMDB_API_KEY` in the root `.env` file is correct.
 *   **Sign Up/Login Fails**:
-    *   Ensure the Backend server is running on `http://localhost:3000`.
+    *   Ensure the Backend server is running on `http://localhost:3001`.
 
 ---
 
@@ -135,4 +135,5 @@ npm run dev
 *   **Database**: MongoDB
 *   **API**: TMDB (The Movie Database)
 
-Enjoy building with CineFlix! 🍿
+Enjoy building with CINEFLIX! 🍿
+
